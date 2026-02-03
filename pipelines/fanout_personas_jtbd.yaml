@@ -1,0 +1,11 @@
+name: fanout_personas_jtbd
+model: qwen3:8b
+stages:
+  - id: personas
+    prompt: "Return a JSON list of three personas for {topic}. JSON only."
+    output: json
+  - id: jtbd
+    mode: map
+    map_from: personas
+    prompt: "For persona {item[value]}, write one clear JTBD statement about {topic}."
+    output: markdown

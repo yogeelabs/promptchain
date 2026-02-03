@@ -61,6 +61,12 @@ python -m promptchain.cli run --pipeline pipelines/three_step.yaml --topic chess
 python -m promptchain.cli run --pipeline pipelines/json_then_use.yaml
 ```
 
+### Run a fan-out map stage (Phase 4)
+
+```zsh
+python -m promptchain.cli run --pipeline pipelines/fanout_personas_jtbd.yaml --topic chess
+```
+
 ### Where outputs go
 
 Each run creates: `runs/<run_id>/`
@@ -71,6 +77,13 @@ Per stage:
 - `runs/<run_id>/stages/<stage_id>/stage.json` — stage metadata, including rendered prompt
 - `runs/<run_id>/stages/<stage_id>/context.json` — context details
 
+Map stage items:
+- `runs/<run_id>/stages/<stage_id>/items/<item_id>/raw.txt`
+- `runs/<run_id>/stages/<stage_id>/items/<item_id>/output.md` or `output.json`
+- `runs/<run_id>/stages/<stage_id>/items/<item_id>/stage.json`
+- `runs/<run_id>/stages/<stage_id>/items/<item_id>/context.json`
+- `runs/<run_id>/stages/<stage_id>/output.json` — manifest of per-item outputs
+
 Run metadata:
 - `runs/<run_id>/run.json`
 
@@ -79,6 +92,10 @@ Run metadata:
 Prompt templates can reference upstream outputs:
 - `{stage_outputs[stage_id]}` for upstream text
 - `{stage_json[stage_id]}` for upstream JSON
+
+Map-stage prompt templates can also reference:
+- `{item[...]}` for the current item (e.g., `{item[value]}`)
+- `{item_index}` and `{item_id}`
 
 `context.json` contains:
 - `rendered_prompt`
@@ -107,4 +124,5 @@ PromptChain normalizes JSON outputs into:
 scripts/smoke_placeholder.zsh
 scripts/smoke_three_step.zsh
 scripts/smoke_json_list.zsh
+scripts/smoke_fanout_personas.zsh
 ```

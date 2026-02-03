@@ -76,7 +76,10 @@ def _normalize_json_output(payload: Any) -> dict[str, Any]:
 
 
 def _stage_output_paths(stage: Stage, stage_dir: Path) -> tuple[Path, Path]:
-    output_path = stage_dir / ("output.json" if stage.output == "json" else "output.md")
+    if stage.mode == "map":
+        output_path = stage_dir / "output.json"
+    else:
+        output_path = stage_dir / ("output.json" if stage.output == "json" else "output.md")
     raw_path = stage_dir / "raw.txt"
     return output_path, raw_path
 
@@ -85,7 +88,7 @@ def _load_stage_output(stage: Stage, stage_dir: Path) -> tuple[str, Any | None]:
     output_path, _ = _stage_output_paths(stage, stage_dir)
     if not output_path.exists():
         raise RunnerError(f"Missing output for stage '{stage.stage_id}' at {output_path}")
-    if stage.output == "json":
+    if stage.mode == "map" or stage.output == "json":
         parsed = _read_json(output_path, f"Stage '{stage.stage_id}' output")
         rendered = json.dumps(parsed, indent=2, ensure_ascii=True)
         return rendered, parsed
@@ -97,7 +100,16 @@ def _stage_completed(stage_dir: Path) -> bool:
     if not stage_meta_path.exists():
         return False
     meta = _read_json(stage_meta_path, "Stage metadata")
-    return meta.get("status") == "completed"
+    return meta.get("status") in {"completed", "completed_with_errors"}
+
+
+def _stage_status(stage_dir: Path) -> str | None:
+    stage_meta_path = stage_dir / "stage.json"
+    if not stage_meta_path.exists():
+        return None
+    meta = _read_json(stage_meta_path, "Stage metadata")
+    status = meta.get("status")
+    return status if isinstance(status, str) else None
 
 
 def _extract_template_fields(template: str) -> list[str]:
@@ -114,10 +126,16 @@ def _build_used_context(
     params: Mapping[str, Any],
     stage_outputs: Mapping[str, str],
     stage_json: Mapping[str, Any],
+    item: Mapping[str, Any] | None = None,
+    item_index: int | None = None,
+    item_id: str | None = None,
 ) -> dict[str, Any]:
     params_used: dict[str, Any] = {}
     stage_outputs_used: dict[str, str] = {}
     stage_json_used: dict[str, Any] = {}
+    item_used: Mapping[str, Any] | None = None
+    item_index_used: int | None = None
+    item_id_used: str | None = None
     raw_fields: list[str] = []
 
     for field in template_fields:
@@ -132,15 +150,36 @@ def _build_used_context(
             if key in stage_json:
                 stage_json_used[key] = stage_json[key]
             continue
+        if field.startswith("item[") and field.endswith("]"):
+            if item is not None:
+                item_used = item
+            continue
+        if field == "item":
+            if item is not None:
+                item_used = item
+            continue
+        if field == "item_index" and item_index is not None:
+            item_index_used = item_index
+            continue
+        if field == "item_id" and item_id is not None:
+            item_id_used = item_id
+            continue
         if field in params:
             params_used[field] = params[field]
 
-    return {
+    context_used: dict[str, Any] = {
         "params": params_used,
         "stage_outputs": stage_outputs_used,
         "stage_json": stage_json_used,
         "template_fields": raw_fields,
     }
+    if item_used is not None:
+        context_used["item"] = item_used
+    if item_index_used is not None:
+        context_used["item_index"] = item_index_used
+    if item_id_used is not None:
+        context_used["item_id"] = item_id_used
+    return context_used
 
 
 def _resolve_stage_index(stage_ids: list[str], stage_id: str, label: str) -> int:
@@ -149,10 +188,368 @@ def _resolve_stage_index(stage_ids: list[str], stage_id: str, label: str) -> int
     return stage_ids.index(stage_id)
 
 
+def _relative_path(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
 class Runner:
     def __init__(self, runs_root: Path | str = "runs") -> None:
         self.runs_root = Path(runs_root)
         self.provider = OllamaProvider()
+
+    def _gather_stage_context(
+        self,
+        pipeline: Pipeline,
+        stage_index: int,
+        run_dir: Path,
+        params: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, str], dict[str, Any]]:
+        stage_outputs: dict[str, str] = {}
+        stage_json: dict[str, Any] = {}
+        for prior in pipeline.stages[:stage_index]:
+            prior_dir = run_dir / "stages" / prior.stage_id
+            output_text, output_json = _load_stage_output(prior, prior_dir)
+            stage_outputs[prior.stage_id] = output_text
+            if output_json is not None:
+                stage_json[prior.stage_id] = output_json
+        context = dict(params)
+        context["stage_outputs"] = stage_outputs
+        context["stage_json"] = stage_json
+        return context, stage_outputs, stage_json
+
+    def _run_single_stage(
+        self,
+        *,
+        pipeline: Pipeline,
+        stage: Stage,
+        stage_index: int,
+        run_dir: Path,
+        params: Mapping[str, Any],
+        meta: dict[str, Any],
+    ) -> None:
+        stage_dir = run_dir / "stages" / stage.stage_id
+        stage_dir.mkdir(parents=True, exist_ok=True)
+
+        if _stage_status(stage_dir) == "completed":
+            return
+
+        context, stage_outputs, stage_json = self._gather_stage_context(
+            pipeline, stage_index, run_dir, params
+        )
+
+        template_fields = _extract_template_fields(stage.prompt)
+        used_context = _build_used_context(
+            template_fields=template_fields,
+            params=params,
+            stage_outputs=stage_outputs,
+            stage_json=stage_json,
+        )
+        rendered_prompt = _render_prompt(stage.prompt, context)
+        stage_meta = {
+            "stage_id": stage.stage_id,
+            "model": stage.model,
+            "output": stage.output,
+            "mode": stage.mode,
+            "prompt": rendered_prompt,
+            "started_at": _utc_now(),
+            "status": "started",
+        }
+        _write_json(stage_dir / "stage.json", stage_meta)
+        _write_json(
+            stage_dir / "context.json",
+            {
+                "rendered_prompt": rendered_prompt,
+                "context_all": {
+                    "params": dict(params),
+                    "stage_outputs": stage_outputs,
+                    "stage_json": stage_json,
+                },
+                "context_used": used_context,
+            },
+        )
+        meta["stages"][stage.stage_id] = {
+            "status": "started",
+            "started_at": stage_meta["started_at"],
+        }
+        _write_json(run_dir / "run.json", meta)
+
+        response_text = self.provider.generate(model=stage.model, prompt=rendered_prompt)
+        (stage_dir / "raw.txt").write_text(response_text)
+
+        if stage.output == "json":
+            try:
+                parsed = json.loads(response_text)
+                normalized = _normalize_json_output(parsed)
+            except (json.JSONDecodeError, RunnerError) as exc:
+                error_message = "Stage output was not valid JSON list."
+                error = {
+                    "error": "Invalid JSON output format.",
+                    "detail": str(exc),
+                }
+                _write_json(stage_dir / "error.json", error)
+                stage_meta["status"] = "failed"
+                stage_meta["failed_at"] = _utc_now()
+                _write_json(stage_dir / "stage.json", stage_meta)
+                meta["stages"][stage.stage_id] = {
+                    "status": "failed",
+                    "failed_at": stage_meta["failed_at"],
+                    "error": error_message,
+                }
+                meta["status"] = "failed"
+                meta["error"] = f"Stage '{stage.stage_id}' output was not valid JSON list."
+                meta["failed_at"] = _utc_now()
+                _write_json(run_dir / "run.json", meta)
+                raise RunnerError(error_message) from exc
+            _write_json(stage_dir / "output.json", normalized)
+        else:
+            (stage_dir / "output.md").write_text(response_text)
+
+        stage_meta["completed_at"] = _utc_now()
+        stage_meta["status"] = "completed"
+        _write_json(stage_dir / "stage.json", stage_meta)
+        meta["stages"][stage.stage_id] = {
+            "status": "completed",
+            "completed_at": stage_meta["completed_at"],
+        }
+        _write_json(run_dir / "run.json", meta)
+
+    def _run_map_stage(
+        self,
+        *,
+        pipeline: Pipeline,
+        stage: Stage,
+        stage_index: int,
+        run_dir: Path,
+        params: Mapping[str, Any],
+        meta: dict[str, Any],
+    ) -> None:
+        stage_dir = run_dir / "stages" / stage.stage_id
+        stage_dir.mkdir(parents=True, exist_ok=True)
+
+        if _stage_completed(stage_dir):
+            return
+
+        if not stage.map_from:
+            raise RunnerError(f"Map stage '{stage.stage_id}' is missing map_from.")
+
+        map_from = stage.map_from
+        if map_from not in [s.stage_id for s in pipeline.stages]:
+            raise RunnerError(f"Map stage '{stage.stage_id}' references unknown stage '{map_from}'.")
+
+        if map_from not in [s.stage_id for s in pipeline.stages[:stage_index]]:
+            raise RunnerError(
+                f"Map stage '{stage.stage_id}' must reference an upstream stage."
+            )
+
+        context, stage_outputs, stage_json = self._gather_stage_context(
+            pipeline, stage_index, run_dir, params
+        )
+
+        source_payload = stage_json.get(map_from)
+        if not isinstance(source_payload, dict) or "items" not in source_payload:
+            raise RunnerError(
+                f"Map stage '{stage.stage_id}' expects JSON list from '{map_from}'."
+            )
+        items = source_payload.get("items")
+        if not isinstance(items, list):
+            raise RunnerError(
+                f"Map stage '{stage.stage_id}' expects JSON list from '{map_from}'."
+            )
+
+        stage_meta = {
+            "stage_id": stage.stage_id,
+            "model": stage.model,
+            "output": stage.output,
+            "mode": stage.mode,
+            "map_from": map_from,
+            "started_at": _utc_now(),
+            "status": "started",
+        }
+        _write_json(stage_dir / "stage.json", stage_meta)
+        _write_json(
+            stage_dir / "context.json",
+            {
+                "map_from": map_from,
+                "item_count": len(items),
+                "context_all": {
+                    "params": dict(params),
+                    "stage_outputs": stage_outputs,
+                    "stage_json": stage_json,
+                },
+            },
+        )
+        meta["stages"][stage.stage_id] = {
+            "status": "started",
+            "started_at": stage_meta["started_at"],
+        }
+        _write_json(run_dir / "run.json", meta)
+
+        items_root = stage_dir / "items"
+        items_root.mkdir(parents=True, exist_ok=True)
+
+        manifest_items: list[dict[str, Any]] = []
+        had_failures = False
+
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                item = {"value": item}
+            item_id = item.get("id") or _stable_item_id(item)
+            item_selected = item.get("_selected", True)
+            item_dir = items_root / item_id
+            item_dir.mkdir(parents=True, exist_ok=True)
+
+            item_stage_path = item_dir / "stage.json"
+            if item_stage_path.exists():
+                existing = _read_json(item_stage_path, "Item metadata")
+                if existing.get("status") == "completed":
+                    manifest_items.append(
+                        {
+                            "id": item_id,
+                            "_selected": item_selected,
+                            "status": "completed",
+                            "item": item,
+                            "output_path": _relative_path(
+                                item_dir
+                                / ("output.json" if stage.output == "json" else "output.md"),
+                                run_dir,
+                            ),
+                        }
+                    )
+                    continue
+
+            if not item_selected:
+                item_meta = {
+                    "stage_id": stage.stage_id,
+                    "item_id": item_id,
+                    "item_index": index,
+                    "status": "skipped",
+                    "skipped_at": _utc_now(),
+                }
+                _write_json(item_dir / "item.json", item)
+                _write_json(item_stage_path, item_meta)
+                manifest_items.append(
+                    {
+                        "id": item_id,
+                        "_selected": False,
+                        "status": "skipped",
+                        "item": item,
+                    }
+                )
+                continue
+
+            item_context = dict(context)
+            item_context["item"] = item
+            item_context["item_index"] = index
+            item_context["item_id"] = item_id
+
+            template_fields = _extract_template_fields(stage.prompt)
+            used_context = _build_used_context(
+                template_fields=template_fields,
+                params=params,
+                stage_outputs=stage_outputs,
+                stage_json=stage_json,
+                item=item,
+                item_index=index,
+                item_id=item_id,
+            )
+            rendered_prompt = _render_prompt(stage.prompt, item_context)
+            item_meta = {
+                "stage_id": stage.stage_id,
+                "model": stage.model,
+                "output": stage.output,
+                "item_id": item_id,
+                "item_index": index,
+                "prompt": rendered_prompt,
+                "started_at": _utc_now(),
+                "status": "started",
+            }
+            _write_json(item_dir / "item.json", item)
+            _write_json(item_stage_path, item_meta)
+            _write_json(
+                item_dir / "context.json",
+                {
+                    "rendered_prompt": rendered_prompt,
+                    "context_all": {
+                        "params": dict(params),
+                        "stage_outputs": stage_outputs,
+                        "stage_json": stage_json,
+                        "item": item,
+                        "item_index": index,
+                        "item_id": item_id,
+                    },
+                    "context_used": used_context,
+                },
+            )
+
+            try:
+                response_text = self.provider.generate(
+                    model=stage.model, prompt=rendered_prompt
+                )
+                (item_dir / "raw.txt").write_text(response_text)
+
+                if stage.output == "json":
+                    try:
+                        parsed = json.loads(response_text)
+                    except json.JSONDecodeError as exc:
+                        raise RunnerError("Item output was not valid JSON.") from exc
+                    _write_json(item_dir / "output.json", parsed)
+                    output_path = item_dir / "output.json"
+                else:
+                    (item_dir / "output.md").write_text(response_text)
+                    output_path = item_dir / "output.md"
+
+                item_meta["completed_at"] = _utc_now()
+                item_meta["status"] = "completed"
+                _write_json(item_stage_path, item_meta)
+                manifest_items.append(
+                    {
+                        "id": item_id,
+                        "_selected": True,
+                        "status": "completed",
+                        "item": item,
+                        "output_path": _relative_path(output_path, run_dir),
+                        "raw_path": _relative_path(item_dir / "raw.txt", run_dir),
+                    }
+                )
+            except Exception as exc:
+                had_failures = True
+                error = {"error": str(exc)}
+                _write_json(item_dir / "error.json", error)
+                item_meta["status"] = "failed"
+                item_meta["failed_at"] = _utc_now()
+                _write_json(item_stage_path, item_meta)
+                manifest_items.append(
+                    {
+                        "id": item_id,
+                        "_selected": True,
+                        "status": "failed",
+                        "item": item,
+                        "error_path": _relative_path(item_dir / "error.json", run_dir),
+                    }
+                )
+
+        stage_meta["completed_at"] = _utc_now()
+        stage_meta["status"] = "completed_with_errors" if had_failures else "completed"
+        stage_meta["items_total"] = len(items)
+        stage_meta["items_failed"] = sum(1 for entry in manifest_items if entry["status"] == "failed")
+        stage_meta["items_skipped"] = sum(1 for entry in manifest_items if entry["status"] == "skipped")
+        stage_meta["items_completed"] = sum(
+            1 for entry in manifest_items if entry["status"] == "completed"
+        )
+        _write_json(stage_dir / "stage.json", stage_meta)
+        _write_json(stage_dir / "output.json", {"items": manifest_items, "map_from": map_from})
+
+        meta["stages"][stage.stage_id] = {
+            "status": stage_meta["status"],
+            "completed_at": stage_meta["completed_at"],
+            "items_completed": stage_meta["items_completed"],
+            "items_failed": stage_meta["items_failed"],
+            "items_skipped": stage_meta["items_skipped"],
+        }
+        _write_json(run_dir / "run.json", meta)
 
     def run(
         self,
@@ -225,98 +622,24 @@ class Runner:
                 if idx < start_idx or idx > stop_idx:
                     continue
 
-                stage_dir = run_dir / "stages" / stage.stage_id
-                stage_dir.mkdir(parents=True, exist_ok=True)
-
-                if _stage_completed(stage_dir):
-                    continue
-
-                context = dict(params)
-                stage_outputs: dict[str, str] = {}
-                stage_json: dict[str, Any] = {}
-                for prior in pipeline.stages[:idx]:
-                    prior_dir = run_dir / "stages" / prior.stage_id
-                    output_text, output_json = _load_stage_output(prior, prior_dir)
-                    stage_outputs[prior.stage_id] = output_text
-                    if output_json is not None:
-                        stage_json[prior.stage_id] = output_json
-                context["stage_outputs"] = stage_outputs
-                context["stage_json"] = stage_json
-
-                template_fields = _extract_template_fields(stage.prompt)
-                used_context = _build_used_context(
-                    template_fields=template_fields,
-                    params=params,
-                    stage_outputs=stage_outputs,
-                    stage_json=stage_json,
-                )
-                rendered_prompt = _render_prompt(stage.prompt, context)
-                stage_meta = {
-                    "stage_id": stage.stage_id,
-                    "model": stage.model,
-                    "output": stage.output,
-                    "prompt": rendered_prompt,
-                    "started_at": _utc_now(),
-                    "status": "started",
-                }
-                _write_json(stage_dir / "stage.json", stage_meta)
-                _write_json(
-                    stage_dir / "context.json",
-                    {
-                        "rendered_prompt": rendered_prompt,
-                        "context_all": {
-                            "params": dict(params),
-                            "stage_outputs": stage_outputs,
-                            "stage_json": stage_json,
-                        },
-                        "context_used": used_context,
-                    },
-                )
-                meta["stages"][stage.stage_id] = {
-                    "status": "started",
-                    "started_at": stage_meta["started_at"],
-                }
-                _write_json(run_dir / "run.json", meta)
-
-                response_text = self.provider.generate(model=stage.model, prompt=rendered_prompt)
-                (stage_dir / "raw.txt").write_text(response_text)
-
-                if stage.output == "json":
-                    try:
-                        parsed = json.loads(response_text)
-                        normalized = _normalize_json_output(parsed)
-                    except (json.JSONDecodeError, RunnerError) as exc:
-                        error_message = "Stage output was not valid JSON list."
-                        error = {
-                            "error": "Invalid JSON output format.",
-                            "detail": str(exc),
-                        }
-                        _write_json(stage_dir / "error.json", error)
-                        stage_meta["status"] = "failed"
-                        stage_meta["failed_at"] = _utc_now()
-                        _write_json(stage_dir / "stage.json", stage_meta)
-                        meta["stages"][stage.stage_id] = {
-                            "status": "failed",
-                            "failed_at": stage_meta["failed_at"],
-                            "error": error_message,
-                        }
-                        meta["status"] = "failed"
-                        meta["error"] = f"Stage '{stage.stage_id}' output was not valid JSON list."
-                        meta["failed_at"] = _utc_now()
-                        _write_json(run_dir / "run.json", meta)
-                        raise RunnerError(error_message) from exc
-                    _write_json(stage_dir / "output.json", normalized)
+                if stage.mode == "map":
+                    self._run_map_stage(
+                        pipeline=pipeline,
+                        stage=stage,
+                        stage_index=idx,
+                        run_dir=run_dir,
+                        params=params,
+                        meta=meta,
+                    )
                 else:
-                    (stage_dir / "output.md").write_text(response_text)
-
-                stage_meta["completed_at"] = _utc_now()
-                stage_meta["status"] = "completed"
-                _write_json(stage_dir / "stage.json", stage_meta)
-                meta["stages"][stage.stage_id] = {
-                    "status": "completed",
-                    "completed_at": stage_meta["completed_at"],
-                }
-                _write_json(run_dir / "run.json", meta)
+                    self._run_single_stage(
+                        pipeline=pipeline,
+                        stage=stage,
+                        stage_index=idx,
+                        run_dir=run_dir,
+                        params=params,
+                        meta=meta,
+                    )
 
                 if idx == stop_idx:
                     if stop_idx == len(pipeline.stages) - 1:
@@ -329,7 +652,13 @@ class Runner:
                     return run_dir
 
             meta["completed_at"] = _utc_now()
-            meta["status"] = "completed"
+            if any(
+                stage_meta.get("status") == "completed_with_errors"
+                for stage_meta in meta.get("stages", {}).values()
+            ):
+                meta["status"] = "completed_with_errors"
+            else:
+                meta["status"] = "completed"
             _write_json(run_dir / "run.json", meta)
         except Exception as exc:
             meta["status"] = "failed"

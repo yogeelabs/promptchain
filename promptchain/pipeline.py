@@ -13,6 +13,8 @@ class Stage:
     prompt: str
     model: str
     output: str  # "markdown" or "json"
+    mode: str  # "single" or "map"
+    map_from: str | None
 
 
 @dataclass
@@ -63,6 +65,28 @@ def load_pipeline(path: str | Path) -> Pipeline:
             raise PipelineError(
                 f"Stage '{stage_id}' output must be 'markdown' or 'json', got '{output}'."
             )
-        stages.append(Stage(stage_id=stage_id, prompt=prompt, model=stage_model, output=output))
+        mode = stage_raw.get("mode", "single")
+        mode = _require_str(mode, f"stages[{stage_id}].mode").lower()
+        if mode not in {"single", "map"}:
+            raise PipelineError(
+                f"Stage '{stage_id}' mode must be 'single' or 'map', got '{mode}'."
+            )
+        map_from = stage_raw.get("map_from")
+        if mode == "map":
+            map_from = _require_str(map_from, f"stages[{stage_id}].map_from")
+        elif map_from is not None:
+            raise PipelineError(
+                f"Stage '{stage_id}' cannot set map_from unless mode is 'map'."
+            )
+        stages.append(
+            Stage(
+                stage_id=stage_id,
+                prompt=prompt,
+                model=stage_model,
+                output=output,
+                mode=mode,
+                map_from=map_from,
+            )
+        )
 
     return Pipeline(name=name, model=model, stages=stages, path=str(path))
