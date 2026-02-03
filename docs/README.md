@@ -55,6 +55,12 @@ Run only a single stage:
 python -m promptchain.cli run --pipeline pipelines/three_step.yaml --topic chess --stage expand
 ```
 
+### Run a JSON → downstream stage (Phase 3)
+
+```zsh
+python -m promptchain.cli run --pipeline pipelines/json_then_use.yaml
+```
+
 ### Where outputs go
 
 Each run creates: `runs/<run_id>/`
@@ -79,9 +85,26 @@ Prompt templates can reference upstream outputs:
 - `context_all` (all available params + upstream outputs)
 - `context_used` (only fields referenced in the prompt template)
 
+### JSON outputs (Phase 3)
+
+Stages with `output: json` must emit either:
+- a JSON list (e.g., `["item A", "item B"]`), or
+- a JSON object with `items` as a list.
+
+PromptChain normalizes JSON outputs into:
+```json
+{
+  "items": [
+    { "id": "item_<hash>", "_selected": true, "value": "item A" }
+  ]
+}
+```
+`id` is deterministic based on item content, and `_selected` defaults to `true`.
+
 ### Smoke scripts
 
 ```zsh
 scripts/smoke_placeholder.zsh
 scripts/smoke_three_step.zsh
+scripts/smoke_json_list.zsh
 ```

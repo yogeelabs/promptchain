@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import string
 from datetime import datetime, timezone
@@ -41,6 +42,37 @@ def _read_json(path: Path, label: str) -> Any:
         return json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         raise RunnerError(f"{label} contained invalid JSON: {path}") from exc
+
+
+def _stable_item_id(payload: Mapping[str, Any]) -> str:
+    content = {key: payload[key] for key in sorted(payload) if key not in {"id", "_selected"}}
+    encoded = json.dumps(content, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    digest = hashlib.sha1(encoded.encode("utf-8")).hexdigest()[:10]
+    return f"item_{digest}"
+
+
+def _normalize_json_output(payload: Any) -> dict[str, Any]:
+    if isinstance(payload, dict) and "items" in payload:
+        items = payload["items"]
+    else:
+        items = payload
+
+    if not isinstance(items, list):
+        raise RunnerError("JSON output must be a list or an object with an 'items' list.")
+
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict):
+            normalized_item = dict(item)
+        else:
+            normalized_item = {"value": item}
+        if "id" not in normalized_item:
+            normalized_item["id"] = _stable_item_id(normalized_item)
+        if "_selected" not in normalized_item:
+            normalized_item["_selected"] = True
+        normalized.append(normalized_item)
+
+    return {"items": normalized}
 
 
 def _stage_output_paths(stage: Stage, stage_dir: Path) -> tuple[Path, Path]:
@@ -252,9 +284,11 @@ class Runner:
                 if stage.output == "json":
                     try:
                         parsed = json.loads(response_text)
-                    except json.JSONDecodeError as exc:
+                        normalized = _normalize_json_output(parsed)
+                    except (json.JSONDecodeError, RunnerError) as exc:
+                        error_message = "Stage output was not valid JSON list."
                         error = {
-                            "error": "Invalid JSON output.",
+                            "error": "Invalid JSON output format.",
                             "detail": str(exc),
                         }
                         _write_json(stage_dir / "error.json", error)
@@ -264,14 +298,14 @@ class Runner:
                         meta["stages"][stage.stage_id] = {
                             "status": "failed",
                             "failed_at": stage_meta["failed_at"],
-                            "error": "Stage output was not valid JSON.",
+                            "error": error_message,
                         }
                         meta["status"] = "failed"
-                        meta["error"] = f"Stage '{stage.stage_id}' output was not valid JSON."
+                        meta["error"] = f"Stage '{stage.stage_id}' output was not valid JSON list."
                         meta["failed_at"] = _utc_now()
                         _write_json(run_dir / "run.json", meta)
-                        raise RunnerError("Stage output was not valid JSON.") from exc
-                    _write_json(stage_dir / "output.json", parsed)
+                        raise RunnerError(error_message) from exc
+                    _write_json(stage_dir / "output.json", normalized)
                 else:
                     (stage_dir / "output.md").write_text(response_text)
 

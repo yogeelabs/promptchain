@@ -1,0 +1,6 @@
+name: json_list
+model: qwen3:8b
+stages:
+  - id: list_items
+    prompt: "Return a JSON list of three fruits. JSON only, no extra text."
+    output: json

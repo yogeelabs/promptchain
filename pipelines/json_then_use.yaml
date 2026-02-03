@@ -1,0 +1,9 @@
+name: json_then_use
+model: qwen3:8b
+stages:
+  - id: list_items
+    prompt: "Return a JSON list of three pytorch benefits. JSON only, no extra text."
+    output: json
+  - id: use_items
+    prompt: "Summarize the list below in one short paragraph:\n\n{stage_json[list_items]}"
+    output: markdown
