@@ -1,0 +1,254 @@
+
+
+# PromptChain — Architecture
+
+This document describes the **system architecture** for PromptChain, derived from `docs/prd.md`.
+It focuses on responsibilities, boundaries, and execution flow—without over-specifying implementation details.
+
+---
+
+## 1. Architectural Principles
+
+PromptChain must prioritize:
+
+1. **Simple prompt authoring**
+   - Prompts are written in plain English.
+   - Structure and control mechanics are handled by the system.
+
+2. **Inspectability**
+   - Every stage produces files a user can open and understand.
+   - Users can pause, edit outputs, and continue.
+
+3. **Deterministic control**
+   - Fan-out (map) is driven by structured artifacts, not free-form text.
+
+4. **Local-first**
+   - Works with local model runtimes (starting with Ollama).
+   - No cloud dependency by default.
+
+5. **Separation of concerns**
+   - Prompt reasoning, control flow, persistence, and model access are cleanly separated.
+
+6. **Clean deliverables**
+   - Final outputs are easy to find and separated from intermediate artifacts.
+
+---
+
+## 2. System Overview
+
+At a high level, PromptChain consists of:
+
+- **CLI**: user entrypoint (run pipeline, run stage, resume)
+- **Pipeline Loader/Resolver**: reads pipeline definition and merges defaults/overrides
+- **Runner**: orchestrates execution stage-by-stage and persists run state
+- **Stage Executors**: implement stage behavior (single, map)
+- **LLM Provider Layer**: calls the configured model per stage (local-first)
+- **Artifact Store**: writes immutable run artifacts and logs
+- **Output Publisher**: collects “final outputs” into a dedicated output location
+
+The architecture is intentionally small and composable.
+
+---
+
+## 3. Execution Model
+
+PromptChain executes a pipeline as a sequence of **stages**. The MVP supports:
+
+### 3.1 Single Stage
+- Runs once per stage.
+- Produces one primary output artifact (JSON and/or Markdown).
+
+### 3.2 Map Stage (Fan-out)
+- Consumes a list artifact produced by an earlier stage.
+- Runs once per list item (optionally filtered by user edits).
+- Produces one output per item, organized under a stage folder.
+
+Map stages must not “iterate over text.” They iterate over a structured list artifact.
+
+---
+
+## 4. Inputs Model
+
+Each stage may take input from:
+
+1. **User parameters**
+   - e.g., `topic`, `goal`, `question` passed at run time
+
+2. **File inputs**
+   - plain text files provided by the user
+
+3. **Upstream artifacts**
+   - outputs from earlier stages in the same run
+
+4. **List inputs (for fan-out)**
+   - a stage output that represents a list of items
+   - the list is the iteration source for map stages
+
+This supports the PRD requirement: “each step can take params, files, or lists.”
+
+---
+
+## 5. Prompt Construction Responsibilities
+
+PromptChain must keep prompts simple while supporting chaining:
+
+- **Prompt templates** may reference:
+  - user params (e.g., topic)
+  - upstream outputs
+  - per-item content (for map stages)
+
+The **Runner** (not the user) is responsible for:
+- assembling context for each stage
+- passing it to the model in a consistent way
+
+The system must not force users to embed schemas or internal control details inside prompts.
+
+---
+
+## 6. Artifact Model & Directory Layout
+
+PromptChain persists everything to disk for inspectability and resumability.
+
+### 6.1 Run Snapshots (Immutable)
+Each run creates a new directory:
+
+`runs/<run_id>/`
+
+It contains:
+- run metadata (inputs, timestamps, pipeline reference)
+- stage outputs (JSON/MD)
+- per-item outputs for map stages
+- logs including raw model responses
+
+Runs are immutable snapshots: a new run is created for a new execution.
+
+### 6.2 Final Output Directory (Deliverables)
+To satisfy the PRD requirement (“final output under output directory separate from intermediate files”):
+
+- Each run includes a dedicated **deliverables** location, separate from intermediate artifacts.
+- Final outputs are **published** into:
+
+`runs/<run_id>/output/`
+
+Optionally (later), users may configure an external output directory, but MVP can treat the per-run output folder as the final deliverables location.
+
+The key architectural rule:
+- **intermediate artifacts live outside `output/`**
+- **final deliverables are copied/collected into `output/`**
+
+---
+
+## 7. Stage Output Types
+
+Stages may emit:
+- **JSON**: structured outputs used for control and fan-out lists
+- **Markdown**: human-readable outputs for review and sharing
+- **Both**: JSON for control + Markdown for readability
+
+A stage that emits JSON must produce a valid JSON artifact file.
+If the model’s response cannot be used as valid JSON:
+- the raw response must still be saved
+- the stage must fail clearly and be recoverable by editing/re-running
+
+---
+
+## 8. Human-in-the-Loop Between Stages
+
+To satisfy “ability to process output of any stage before next stage”:
+
+The execution model must support:
+- running only stage A
+- user edits stage A output file(s)
+- resuming execution from stage B
+
+This requires:
+- stage outputs to be stable, well-located files
+- a “resume” behavior that reads the latest saved artifacts
+
+The architecture assumes users may modify artifacts between steps.
+
+---
+
+## 9. Model Selection & Provider Layer
+
+To satisfy “different models for each stage”:
+
+- Each stage can specify which model to use.
+- A pipeline can define defaults.
+- The runner resolves the effective model configuration per stage.
+
+The provider layer:
+- abstracts model invocation
+- supports local-first model runtimes (starting with Ollama)
+- is structured so additional providers can be added later
+
+The runner must log which model was used per stage for traceability.
+
+---
+
+## 10. Orchestration & Resumability
+
+The Runner is responsible for:
+- executing stages in order
+- skipping stages that are already completed when resuming (based on existing artifacts)
+- supporting partial execution modes:
+  - run full pipeline
+  - run a single stage
+  - run from a stage onward
+
+Resumability is achieved by:
+- artifact persistence per stage
+- clear stage completion markers in run metadata
+- non-destructive failure handling
+
+---
+
+## 11. Failure Handling
+
+Failures must be recoverable.
+
+Architectural requirements:
+- raw model outputs are always saved
+- errors must identify the stage (and item, for map stages) that failed
+- successful prior outputs remain intact
+- map item failures are isolated (other items can still complete)
+
+This supports the PRD requirement: “failure does not require starting over.”
+
+---
+
+## 12. Minimal Extensibility Points (MVP-Safe)
+
+PromptChain should be designed to grow without redesign:
+
+- Add new stage types later (e.g., reduce) without changing the runner contract.
+- Add new providers later without changing stage execution logic.
+- Add output publishing strategies later without changing stage output format.
+
+However, MVP should not implement features beyond the PRD MVP scope.
+
+---
+
+## 13. What This Architecture Explicitly Avoids
+
+To keep the system aligned with the PRD and prevent complexity creep, the architecture avoids:
+
+- autonomous agents or planners
+- implicit mutation of prior artifacts
+- hidden control logic inside prompts
+- complex orchestration frameworks
+- Markdown → structured data synchronization
+
+---
+
+## 14. Summary
+
+This architecture implements PromptChain as a small, local-first execution engine where:
+
+- users write plain-English prompts
+- workflows can be single-step, sequential, or fan-out
+- users can pause, edit outputs, and resume
+- different models can be used per stage
+- final deliverables are always easy to find in a dedicated output location
+
+It is intentionally minimal so that complexity grows only when required.
