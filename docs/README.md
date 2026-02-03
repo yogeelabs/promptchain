@@ -145,6 +145,7 @@ Published outputs (examples):
 
 Run metadata:
 - `runs/<run_id>/run.json`
+- `runs/<run_id>/run.log` — timestamped stage-level events and errors
 
 ### Prompt context references
 

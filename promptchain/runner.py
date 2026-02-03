@@ -38,6 +38,14 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=True))
 
 
+def _append_log(run_dir: Path, message: str) -> None:
+    timestamp = _utc_now()
+    log_path = run_dir / "run.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8", errors="ignore") as handle:
+        handle.write(f"[{timestamp}] {message}\n")
+
+
 def _read_json(path: Path, label: str) -> Any:
     try:
         return json.loads(path.read_text())
@@ -290,6 +298,7 @@ class Runner:
             "started_at": stage_meta["started_at"],
         }
         _write_json(run_dir / "run.json", meta)
+        _append_log(run_dir, f"stage:{stage.stage_id} status=started mode={stage.mode}")
 
         response_text = self.provider.generate(model=stage.model, prompt=rendered_prompt)
         (stage_dir / "raw.txt").write_text(response_text)
@@ -301,6 +310,7 @@ class Runner:
             except (json.JSONDecodeError, RunnerError) as exc:
                 error_message = "Stage output was not valid JSON list."
                 error = {
+                    "stage_id": stage.stage_id,
                     "error": "Invalid JSON output format.",
                     "detail": str(exc),
                 }
@@ -317,6 +327,10 @@ class Runner:
                 meta["error"] = f"Stage '{stage.stage_id}' output was not valid JSON list."
                 meta["failed_at"] = _utc_now()
                 _write_json(run_dir / "run.json", meta)
+                _append_log(
+                    run_dir,
+                    f"stage:{stage.stage_id} status=failed error=invalid_json_output",
+                )
                 raise RunnerError(error_message) from exc
             _write_json(stage_dir / "output.json", normalized)
         else:
@@ -330,6 +344,7 @@ class Runner:
             "completed_at": stage_meta["completed_at"],
         }
         _write_json(run_dir / "run.json", meta)
+        _append_log(run_dir, f"stage:{stage.stage_id} status=completed")
 
     def _run_map_stage(
         self,
@@ -404,6 +419,10 @@ class Runner:
             "started_at": stage_meta["started_at"],
         }
         _write_json(run_dir / "run.json", meta)
+        _append_log(
+            run_dir,
+            f"stage:{stage.stage_id} status=started mode={stage.mode} map_from={map_from}",
+        )
 
         items_root = stage_dir / "items"
         items_root.mkdir(parents=True, exist_ok=True)
@@ -539,7 +558,12 @@ class Runner:
                 )
             except Exception as exc:
                 had_failures = True
-                error = {"error": str(exc)}
+                error = {
+                    "stage_id": stage.stage_id,
+                    "item_id": item_id,
+                    "item_index": index,
+                    "error": str(exc),
+                }
                 _write_json(item_dir / "error.json", error)
                 item_meta["status"] = "failed"
                 item_meta["failed_at"] = _utc_now()
@@ -550,8 +574,13 @@ class Runner:
                         "_selected": True,
                         "status": "failed",
                         "item": item,
+                        "error": str(exc),
                         "error_path": _relative_path(item_dir / "error.json", run_dir),
                     }
+                )
+                _append_log(
+                    run_dir,
+                    f"stage:{stage.stage_id} item:{item_id} status=failed error={exc}",
                 )
 
         stage_meta["completed_at"] = _utc_now()
@@ -573,6 +602,16 @@ class Runner:
             "items_skipped": stage_meta["items_skipped"],
         }
         _write_json(run_dir / "run.json", meta)
+        _append_log(
+            run_dir,
+            (
+                "stage:"
+                f"{stage.stage_id} status={stage_meta['status']} "
+                f"items_completed={stage_meta['items_completed']} "
+                f"items_failed={stage_meta['items_failed']} "
+                f"items_skipped={stage_meta['items_skipped']}"
+            ),
+        )
 
     def _publish_outputs(self, pipeline: Pipeline, run_dir: Path, meta: dict[str, Any]) -> None:
         output_dir = run_dir / "output"
@@ -673,6 +712,7 @@ class Runner:
                 "stages": {},
             }
             _write_json(run_dir / "run.json", meta)
+            _append_log(run_dir, f"run status=started pipeline={pipeline.name}")
         else:
             run_dir = Path(run_dir)
             run_meta_path = run_dir / "run.json"
@@ -683,6 +723,7 @@ class Runner:
             if meta.get("pipeline") != pipeline.name:
                 raise RunnerError("Pipeline name does not match existing run.")
             meta.setdefault("stages", {})
+            _append_log(run_dir, f"run status=resumed pipeline={pipeline.name}")
 
         for stage in pipeline.stages[:start_idx]:
             stage_dir = run_dir / "stages" / stage.stage_id
@@ -724,6 +765,7 @@ class Runner:
                         meta["stopped_at"] = _utc_now()
                         meta["status"] = "stopped"
                     _write_json(run_dir / "run.json", meta)
+                    _append_log(run_dir, f"run status={meta['status']}")
                     self._publish_outputs(pipeline, run_dir, meta)
                     return run_dir
 
@@ -736,12 +778,14 @@ class Runner:
             else:
                 meta["status"] = "completed"
             _write_json(run_dir / "run.json", meta)
+            _append_log(run_dir, f"run status={meta['status']}")
             self._publish_outputs(pipeline, run_dir, meta)
         except Exception as exc:
             meta["status"] = "failed"
             meta["error"] = str(exc)
             meta["failed_at"] = _utc_now()
             _write_json(run_dir / "run.json", meta)
+            _append_log(run_dir, f"run status=failed error={exc}")
             raise
 
         return run_dir
