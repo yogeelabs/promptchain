@@ -396,6 +396,11 @@ class Runner:
         for index, item in enumerate(items):
             if not isinstance(item, dict):
                 item = {"value": item}
+            elif "value" not in item:
+                if len(item) == 1:
+                    item["value"] = next(iter(item.values()))
+                else:
+                    item["value"] = json.dumps(item, ensure_ascii=True)
             item_id = item.get("id") or _stable_item_id(item)
             item_selected = item.get("_selected", True)
             item_dir = items_root / item_id
