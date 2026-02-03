@@ -1,0 +1,18 @@
+name: publish_list_map_map
+model: qwen3:8b
+stages:
+  - id: ideas
+    prompt: "List 3 simple workshop topics for {theme} as a JSON list."
+    output: json
+  - id: drafts
+    mode: map
+    map_from: ideas
+    prompt: "Write a 2-3 sentence draft intro for the topic: {item[value]}"
+    output: markdown
+    publish: true
+  - id: polish
+    mode: map
+    map_from: drafts
+    prompt: "Write a tighter, polished intro for the topic: {item[item][value]}"
+    output: markdown
+    publish: true

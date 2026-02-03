@@ -15,6 +15,7 @@ class Stage:
     output: str  # "markdown" or "json"
     mode: str  # "single" or "map"
     map_from: str | None
+    publish: bool
 
 
 @dataclass
@@ -32,6 +33,12 @@ class PipelineError(RuntimeError):
 def _require_str(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise PipelineError(f"Field '{field}' must be a non-empty string.")
+    return value
+
+
+def _require_bool(value: Any, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise PipelineError(f"Field '{field}' must be a boolean.")
     return value
 
 
@@ -78,6 +85,8 @@ def load_pipeline(path: str | Path) -> Pipeline:
             raise PipelineError(
                 f"Stage '{stage_id}' cannot set map_from unless mode is 'map'."
             )
+        publish = stage_raw.get("publish", False)
+        publish = _require_bool(publish, f"stages[{stage_id}].publish")
         stages.append(
             Stage(
                 stage_id=stage_id,
@@ -86,6 +95,7 @@ def load_pipeline(path: str | Path) -> Pipeline:
                 output=output,
                 mode=mode,
                 map_from=map_from,
+                publish=publish,
             )
         )
 

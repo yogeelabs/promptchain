@@ -1,0 +1,10 @@
+name: mixed_models
+model: qwen3:8b
+stages:
+  - id: draft
+    prompt: "Write 3 bullets about {topic}."
+    output: markdown
+  - id: refine
+    model: gemma3:12b  # override per-stage model here if desired
+    prompt: "Rewrite the bullets into a short paragraph.\n\n{stage_outputs[draft]}"
+    output: markdown

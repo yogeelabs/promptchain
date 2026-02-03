@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import string
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,21 +96,25 @@ def _load_stage_output(stage: Stage, stage_dir: Path) -> tuple[str, Any | None]:
     return output_path.read_text(), None
 
 
-def _stage_completed(stage_dir: Path) -> bool:
-    stage_meta_path = stage_dir / "stage.json"
-    if not stage_meta_path.exists():
-        return False
-    meta = _read_json(stage_meta_path, "Stage metadata")
-    return meta.get("status") in {"completed", "completed_with_errors"}
+def _stage_output_path(stage: Stage, stage_dir: Path) -> Path:
+    output_path, _ = _stage_output_paths(stage, stage_dir)
+    return output_path
 
 
-def _stage_status(stage_dir: Path) -> str | None:
-    stage_meta_path = stage_dir / "stage.json"
-    if not stage_meta_path.exists():
-        return None
-    meta = _read_json(stage_meta_path, "Stage metadata")
-    status = meta.get("status")
-    return status if isinstance(status, str) else None
+def _stage_output_exists(stage: Stage, stage_dir: Path) -> bool:
+    return _stage_output_path(stage, stage_dir).exists()
+
+
+def _item_output_path(stage: Stage, item_dir: Path) -> Path:
+    return item_dir / ("output.json" if stage.output == "json" else "output.md")
+
+
+def _item_output_exists(stage: Stage, item_dir: Path) -> bool:
+    return _item_output_path(stage, item_dir).exists()
+
+
+def _stage_completed(stage: Stage, stage_dir: Path) -> bool:
+    return _stage_output_exists(stage, stage_dir)
 
 
 def _extract_template_fields(template: str) -> list[str]:
@@ -195,6 +200,13 @@ def _relative_path(path: Path, root: Path) -> str:
         return str(path)
 
 
+def _stage_publish_enabled(pipeline: Pipeline) -> list[Stage]:
+    publish_stages = [stage for stage in pipeline.stages if stage.publish]
+    if publish_stages:
+        return publish_stages
+    return [pipeline.stages[-1]]
+
+
 class Runner:
     def __init__(self, runs_root: Path | str = "runs") -> None:
         self.runs_root = Path(runs_root)
@@ -233,12 +245,14 @@ class Runner:
         stage_dir = run_dir / "stages" / stage.stage_id
         stage_dir.mkdir(parents=True, exist_ok=True)
 
-        if _stage_status(stage_dir) == "completed":
+        if _stage_completed(stage, stage_dir):
             return
 
         context, stage_outputs, stage_json = self._gather_stage_context(
             pipeline, stage_index, run_dir, params
         )
+
+        self.provider.ensure_model(stage.model)
 
         template_fields = _extract_template_fields(stage.prompt)
         used_context = _build_used_context(
@@ -253,6 +267,7 @@ class Runner:
             "model": stage.model,
             "output": stage.output,
             "mode": stage.mode,
+            "publish": stage.publish,
             "prompt": rendered_prompt,
             "started_at": _utc_now(),
             "status": "started",
@@ -329,7 +344,7 @@ class Runner:
         stage_dir = run_dir / "stages" / stage.stage_id
         stage_dir.mkdir(parents=True, exist_ok=True)
 
-        if _stage_completed(stage_dir):
+        if _stage_completed(stage, stage_dir):
             return
 
         if not stage.map_from:
@@ -348,6 +363,8 @@ class Runner:
             pipeline, stage_index, run_dir, params
         )
 
+        self.provider.ensure_model(stage.model)
+
         source_payload = stage_json.get(map_from)
         if not isinstance(source_payload, dict) or "items" not in source_payload:
             raise RunnerError(
@@ -365,6 +382,7 @@ class Runner:
             "output": stage.output,
             "mode": stage.mode,
             "map_from": map_from,
+            "publish": stage.publish,
             "started_at": _utc_now(),
             "status": "started",
         }
@@ -407,24 +425,6 @@ class Runner:
             item_dir.mkdir(parents=True, exist_ok=True)
 
             item_stage_path = item_dir / "stage.json"
-            if item_stage_path.exists():
-                existing = _read_json(item_stage_path, "Item metadata")
-                if existing.get("status") == "completed":
-                    manifest_items.append(
-                        {
-                            "id": item_id,
-                            "_selected": item_selected,
-                            "status": "completed",
-                            "item": item,
-                            "output_path": _relative_path(
-                                item_dir
-                                / ("output.json" if stage.output == "json" else "output.md"),
-                                run_dir,
-                            ),
-                        }
-                    )
-                    continue
-
             if not item_selected:
                 item_meta = {
                     "stage_id": stage.stage_id,
@@ -433,8 +433,11 @@ class Runner:
                     "status": "skipped",
                     "skipped_at": _utc_now(),
                 }
-                _write_json(item_dir / "item.json", item)
-                _write_json(item_stage_path, item_meta)
+                item_path = item_dir / "item.json"
+                if not item_path.exists():
+                    _write_json(item_path, item)
+                if not item_stage_path.exists():
+                    _write_json(item_stage_path, item_meta)
                 manifest_items.append(
                     {
                         "id": item_id,
@@ -443,6 +446,21 @@ class Runner:
                         "item": item,
                     }
                 )
+                continue
+
+            item_output_path = _item_output_path(stage, item_dir)
+            if item_output_path.exists():
+                manifest_entry = {
+                    "id": item_id,
+                    "_selected": True,
+                    "status": "completed",
+                    "item": item,
+                    "output_path": _relative_path(item_output_path, run_dir),
+                }
+                raw_path = item_dir / "raw.txt"
+                if raw_path.exists():
+                    manifest_entry["raw_path"] = _relative_path(raw_path, run_dir)
+                manifest_items.append(manifest_entry)
                 continue
 
             item_context = dict(context)
@@ -556,6 +574,56 @@ class Runner:
         }
         _write_json(run_dir / "run.json", meta)
 
+    def _publish_outputs(self, pipeline: Pipeline, run_dir: Path, meta: dict[str, Any]) -> None:
+        output_dir = run_dir / "output"
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        published: list[dict[str, Any]] = []
+        for stage in _stage_publish_enabled(pipeline):
+            stage_dir = run_dir / "stages" / stage.stage_id
+            if stage.mode == "map":
+                items_root = stage_dir / "items"
+                if not items_root.exists():
+                    continue
+                for item_dir in items_root.iterdir():
+                    if not item_dir.is_dir():
+                        continue
+                    item_output = _item_output_path(stage, item_dir)
+                    if not item_output.exists():
+                        continue
+                    dest = output_dir / stage.stage_id / item_dir.name / item_output.name
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item_output, dest)
+                    published.append(
+                        {
+                            "stage_id": stage.stage_id,
+                            "item_id": item_dir.name,
+                            "output_path": _relative_path(dest, run_dir),
+                        }
+                    )
+            else:
+                stage_output = _stage_output_path(stage, stage_dir)
+                if not stage_output.exists():
+                    continue
+                dest = output_dir / stage.stage_id / stage_output.name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(stage_output, dest)
+                published.append(
+                    {
+                        "stage_id": stage.stage_id,
+                        "output_path": _relative_path(dest, run_dir),
+                    }
+                )
+
+        meta["output"] = {
+            "published_at": _utc_now(),
+            "path": "output",
+            "artifacts": published,
+        }
+        _write_json(run_dir / "run.json", meta)
+
     def run(
         self,
         pipeline: Pipeline,
@@ -586,6 +654,8 @@ class Runner:
         stop_idx = _resolve_stage_index(stage_ids, stop_after, "Stop-after")
         if start_idx > stop_idx:
             raise RunnerError("Start stage must come before stop-after stage.")
+        if run_dir is None and start_idx > 0:
+            raise RunnerError("Starting from a later stage requires --run-dir to resume.")
 
         if run_dir is None:
             self.runs_root.mkdir(parents=True, exist_ok=True)
@@ -616,7 +686,7 @@ class Runner:
 
         for stage in pipeline.stages[:start_idx]:
             stage_dir = run_dir / "stages" / stage.stage_id
-            if not _stage_completed(stage_dir):
+            if not _stage_completed(stage, stage_dir):
                 raise RunnerError(
                     f"Cannot start at '{stage_ids[start_idx]}': "
                     f"upstream stage '{stage.stage_id}' is incomplete."
@@ -654,6 +724,7 @@ class Runner:
                         meta["stopped_at"] = _utc_now()
                         meta["status"] = "stopped"
                     _write_json(run_dir / "run.json", meta)
+                    self._publish_outputs(pipeline, run_dir, meta)
                     return run_dir
 
             meta["completed_at"] = _utc_now()
@@ -665,6 +736,7 @@ class Runner:
             else:
                 meta["status"] = "completed"
             _write_json(run_dir / "run.json", meta)
+            self._publish_outputs(pipeline, run_dir, meta)
         except Exception as exc:
             meta["status"] = "failed"
             meta["error"] = str(exc)

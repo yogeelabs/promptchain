@@ -1,0 +1,7 @@
+name: publish_example
+model: qwen3:8b
+stages:
+  - id: draft
+    prompt: "Draft a concise summary of {topic} in 3-5 bullet points."
+    output: markdown
+    publish: true

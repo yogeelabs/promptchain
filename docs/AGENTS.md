@@ -53,6 +53,11 @@ If tempted to add these, stop and re-check `plan.md`.
 
 ### 4.0 Standard Commands (Format / Lint / Tests / Smoke)
 
+Activate the local virtual environment first:
+```zsh
+source .venv/bin/activate
+```
+
 Run these from repo root:
 ```zsh
 scripts/format.zsh

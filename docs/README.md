@@ -67,9 +67,64 @@ python -m promptchain.cli run --pipeline pipelines/json_then_use.yaml
 python -m promptchain.cli run --pipeline pipelines/fanout_personas_jtbd.yaml --topic chess
 ```
 
+### Human-in-the-loop editing & resume (Phase 5)
+
+Pause after a stage, edit outputs, then resume downstream without recomputation:
+
+```zsh
+python -m promptchain.cli run --pipeline pipelines/fanout_personas_jtbd.yaml --topic chess --stop-after personas
+# edit runs/<run_id>/stages/personas/output.json
+python -m promptchain.cli run --pipeline pipelines/fanout_personas_jtbd.yaml --run-dir runs/<run_id> --from-stage jtbd
+```
+
+Notes:
+- Resume never overwrites existing `output.*` artifacts. To recompute a stage or item, delete its output file (or the whole stage/item directory) first.
+- For list outputs, you can prune items or set `_selected: false` to skip fan-out items.
+- If you manually fix or create an `output.*` file for a failed stage/item, resume will treat it as completed.
+
+### Per-stage model selection (Phase 6)
+
+Set a pipeline default `model`, and override per stage as needed:
+
+```yaml
+name: mixed_models
+model: qwen3:8b
+stages:
+  - id: brainstorm
+    prompt: "List five angles for {topic}."
+    output: markdown
+  - id: refine
+    model: llama3.1:70b
+    prompt: "Refine these angles into a tight brief:\n\n{stage_outputs[brainstorm]}"
+    output: markdown
+```
+
+If a model is not available in Ollama, the run fails fast with a clear error listing available models.
+
 ### Where outputs go
 
 Each run creates: `runs/<run_id>/`
+
+Final deliverables are published to:
+- `runs/<run_id>/output/`
+
+Publishing rules:
+- If any stage sets `publish: true`, only those stages are published.
+- If no stage sets `publish: true`, the last stage is published by default.
+
+Example:
+```yaml
+stages:
+  - id: draft
+    prompt: "Draft a short summary of {topic}."
+    output: markdown
+    publish: true
+```
+
+Run the example pipeline:
+```zsh
+python -m promptchain.cli run --pipeline pipelines/publish_example.yaml --topic chess
+```
 
 Per stage:
 - `runs/<run_id>/stages/<stage_id>/raw.txt` — raw model output
@@ -83,6 +138,10 @@ Map stage items:
 - `runs/<run_id>/stages/<stage_id>/items/<item_id>/stage.json`
 - `runs/<run_id>/stages/<stage_id>/items/<item_id>/context.json`
 - `runs/<run_id>/stages/<stage_id>/output.json` — manifest of per-item outputs
+
+Published outputs (examples):
+- `runs/<run_id>/output/<stage_id>/output.md` or `output.json`
+- `runs/<run_id>/output/<stage_id>/<item_id>/output.md` or `output.json` (map stages)
 
 Run metadata:
 - `runs/<run_id>/run.json`
@@ -128,4 +187,5 @@ scripts/smoke_fanout_personas.zsh
 scripts/smoke_three_stage_fanout_classify.zsh
 scripts/smoke_three_stage_fanout_classify_per_item.zsh
 scripts/smoke_indian_spices_benefits.zsh
+scripts/smoke_mixed_models.zsh
 ```
