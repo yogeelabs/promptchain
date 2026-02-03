@@ -1,0 +1,11 @@
+name: indian_spices_benefits
+model: qwen3:8b
+stages:
+  - id: list_spices
+    prompt: "Return a JSON list of exactly five Indian spices as strings. JSON only."
+    output: json
+  - id: spice_benefits
+    mode: map
+    map_from: list_spices
+    prompt: "List 3-5 benefits of {item[value]} in bullet points. Output markdown only."
+    output: markdown

@@ -125,4 +125,7 @@ scripts/smoke_placeholder.zsh
 scripts/smoke_three_step.zsh
 scripts/smoke_json_list.zsh
 scripts/smoke_fanout_personas.zsh
+scripts/smoke_three_stage_fanout_classify.zsh
+scripts/smoke_three_stage_fanout_classify_per_item.zsh
+scripts/smoke_indian_spices_benefits.zsh
 ```

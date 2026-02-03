@@ -1,0 +1,14 @@
+name: three_stage_fanout_classify
+model: qwen3:8b
+stages:
+  - id: list_items
+    prompt: "Return a JSON list of three product ideas for {topic}. JSON only."
+    output: json
+  - id: expand_item
+    mode: map
+    map_from: list_items
+    prompt: "Expand this idea into 3 bullets: {item[value]}"
+    output: markdown
+  - id: classify
+    prompt: "Classify each item as fast/slow to build based on the expansions below.\n\n{stage_json[expand_item]}"
+    output: markdown
