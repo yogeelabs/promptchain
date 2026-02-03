@@ -38,6 +38,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run", help="Run a pipeline")
     run_parser.add_argument("--pipeline", required=True, help="Path to pipeline YAML")
+    run_parser.add_argument("--run-dir", help="Resume an existing run directory")
+    run_parser.add_argument("--from-stage", help="Start execution from a stage id")
+    run_parser.add_argument("--stop-after", help="Stop execution after a stage id")
+    run_parser.add_argument("--stage", help="Run only a single stage id")
 
     return parser
 
@@ -49,9 +53,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         try:
             params = _parse_params(unknown)
+            if args.run_dir and params:
+                raise RunnerError("Do not pass parameters when resuming a run.")
             pipeline = load_pipeline(args.pipeline)
             runner = Runner()
-            run_dir = runner.run(pipeline, params)
+            run_dir = runner.run(
+                pipeline,
+                params,
+                run_dir=args.run_dir,
+                start_stage=args.from_stage,
+                stop_after=args.stop_after,
+                stage_only=args.stage,
+            )
             print(f"run_dir: {run_dir}")
             return 0
         except (PipelineError, RunnerError, RuntimeError) as exc:

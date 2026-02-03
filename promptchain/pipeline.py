@@ -20,6 +20,7 @@ class Pipeline:
     name: str
     model: str
     stages: list[Stage]
+    path: str
 
 
 class PipelineError(RuntimeError):
@@ -64,4 +65,4 @@ def load_pipeline(path: str | Path) -> Pipeline:
             )
         stages.append(Stage(stage_id=stage_id, prompt=prompt, model=stage_model, output=output))
 
-    return Pipeline(name=name, model=model, stages=stages)
+    return Pipeline(name=name, model=model, stages=stages, path=str(path))

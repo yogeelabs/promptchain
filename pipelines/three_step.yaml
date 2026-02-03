@@ -1,0 +1,12 @@
+name: three_step
+model: qwen3:8b
+stages:
+  - id: brainstorm
+    prompt: "List three key ideas about {topic} in plain text."
+    output: markdown
+  - id: expand
+    prompt: "Expand each idea from the brainstorm:\n\n{stage_outputs[brainstorm]}"
+    output: markdown
+  - id: summarize
+    prompt: "Write a concise summary based on the expanded ideas:\n\n{stage_outputs[expand]}"
+    output: markdown

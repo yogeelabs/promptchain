@@ -1,8 +1,8 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-PIPELINE="pipelines/single.yaml"
-STAGE_ID="write_paragraph"
+PIPELINE="pipelines/three_step.yaml"
+STAGE_IDS=("brainstorm" "expand" "summarize")
 
 if command -v python >/dev/null 2>&1; then
   PYTHON_BIN="python"
@@ -41,14 +41,23 @@ if [[ ! -f "$RUN_DIR/run.json" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/raw.txt" ]]; then
-  echo "Smoke check failed: raw.txt missing" >&2
-  exit 1
-fi
-
-if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/output.md" ]]; then
-  echo "Smoke check failed: output.md missing" >&2
-  exit 1
-fi
+for STAGE_ID in "${STAGE_IDS[@]}"; do
+  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/raw.txt" ]]; then
+    echo "Smoke check failed: raw.txt missing for stage $STAGE_ID" >&2
+    exit 1
+  fi
+  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/output.md" ]]; then
+    echo "Smoke check failed: output.md missing for stage $STAGE_ID" >&2
+    exit 1
+  fi
+  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/context.json" ]]; then
+    echo "Smoke check failed: context.json missing for stage $STAGE_ID" >&2
+    exit 1
+  fi
+  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/stage.json" ]]; then
+    echo "Smoke check failed: stage.json missing for stage $STAGE_ID" >&2
+    exit 1
+  fi
+done
 
 echo "Smoke check passed: $RUN_DIR"
