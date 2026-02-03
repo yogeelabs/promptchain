@@ -11,7 +11,12 @@ pip install -r requirements.txt
 scripts/smoke_placeholder.zsh
 ```
 
-## Notes
+## Run a Single Pipeline (Phase 1)
 
-- CLI and engine are implemented in later phases.
-- Smoke script is a placeholder until Phase 1.
+```zsh
+python -m promptchain.cli run --pipeline pipelines/single.yaml --topic chess
+```
+
+Notes:
+- Requires Ollama running at http://localhost:11434 with the model set in the pipeline.
+- Outputs land under `runs/<run_id>/`.

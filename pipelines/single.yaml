@@ -1,0 +1,6 @@
+name: single
+model: qwen3:8b
+stages:
+  - id: write_paragraph
+    prompt: "Write a short paragraph about {topic}."
+    output: markdown
