@@ -16,7 +16,16 @@ class Stage:
     output: str  # "markdown" or "json"
     mode: str  # "single" or "map"
     map_from: str | None
+    map_from_file: str | None
     publish: bool
+    input_files: dict[str, "InputFile"]
+
+
+@dataclass
+class InputFile:
+    name: str
+    path: str
+    kind: str  # "text" or "json"
 
 
 @dataclass
@@ -51,6 +60,30 @@ def _require_provider(value: Any, field: str) -> str:
             f"Field '{field}' must be 'ollama' or 'openai', got '{provider}'."
         )
     return provider
+
+
+def _require_mapping(value: Any, field: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise PipelineError(f"Field '{field}' must be a mapping.")
+    return value
+
+
+def _parse_input_file(name: str, value: Any, field: str) -> InputFile:
+    if isinstance(value, str):
+        path = value
+        kind = "json" if path.lower().endswith(".json") else "text"
+        return InputFile(name=name, path=path, kind=kind)
+    if isinstance(value, dict):
+        raw_path = value.get("path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise PipelineError(f"Field '{field}.path' must be a non-empty string.")
+        raw_kind = value.get("type", "json" if raw_path.lower().endswith(".json") else "text")
+        if not isinstance(raw_kind, str) or raw_kind.lower() not in {"text", "json"}:
+            raise PipelineError(
+                f"Field '{field}.type' must be 'text' or 'json', got '{raw_kind}'."
+            )
+        return InputFile(name=name, path=raw_path, kind=raw_kind.lower())
+    raise PipelineError(f"Field '{field}' must be a string path or mapping.")
 
 
 def load_pipeline(path: str | Path) -> Pipeline:
@@ -93,12 +126,45 @@ def load_pipeline(path: str | Path) -> Pipeline:
                 f"Stage '{stage_id}' mode must be 'single' or 'map', got '{mode}'."
             )
         map_from = stage_raw.get("map_from")
+        map_from_file = stage_raw.get("map_from_file")
         if mode == "map":
-            map_from = _require_str(map_from, f"stages[{stage_id}].map_from")
+            if map_from and map_from_file:
+                raise PipelineError(
+                    f"Stage '{stage_id}' cannot set both map_from and map_from_file."
+                )
+            if map_from_file is not None:
+                map_from_file = _require_str(
+                    map_from_file, f"stages[{stage_id}].map_from_file"
+                )
+                map_from = None
+            else:
+                map_from = _require_str(map_from, f"stages[{stage_id}].map_from")
         elif map_from is not None:
             raise PipelineError(
                 f"Stage '{stage_id}' cannot set map_from unless mode is 'map'."
             )
+        elif map_from_file is not None:
+            raise PipelineError(
+                f"Stage '{stage_id}' cannot set map_from_file unless mode is 'map'."
+            )
+
+        input_files: dict[str, InputFile] = {}
+        inputs_raw = stage_raw.get("inputs")
+        if inputs_raw is not None:
+            inputs = _require_mapping(inputs_raw, f"stages[{stage_id}].inputs")
+            files_raw = inputs.get("files")
+            if files_raw is None:
+                files_raw = {}
+            files = _require_mapping(files_raw, f"stages[{stage_id}].inputs.files")
+            for name, value in files.items():
+                if not isinstance(name, str) or not name.strip():
+                    raise PipelineError(
+                        f"Field 'stages[{stage_id}].inputs.files' keys must be non-empty strings."
+                    )
+                input_files[name] = _parse_input_file(
+                    name, value, f"stages[{stage_id}].inputs.files.{name}"
+                )
+
         publish = stage_raw.get("publish", False)
         publish = _require_bool(publish, f"stages[{stage_id}].publish")
         stages.append(
@@ -110,7 +176,9 @@ def load_pipeline(path: str | Path) -> Pipeline:
                 output=output,
                 mode=mode,
                 map_from=map_from,
+                map_from_file=map_from_file,
                 publish=publish,
+                input_files=input_files,
             )
         )
 

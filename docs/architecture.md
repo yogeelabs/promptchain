@@ -63,7 +63,8 @@ PromptChain executes a pipeline as a sequence of **stages**. The MVP supports:
 - Runs once per list item (optionally filtered by user edits).
 - Produces one output per item, organized under a stage folder.
 
-Map stages must not “iterate over text.” They iterate over a structured list artifact.
+Map stages must iterate over deterministic list sources, not free-form text prompts.
+List-based fan-out preserves stable ordering and stable identity for each item across runs.
 
 ---
 
@@ -75,13 +76,16 @@ Each stage may take input from:
    - e.g., `topic`, `goal`, `question` passed at run time
 
 2. **File inputs**
-   - plain text files provided by the user
+   - plain text or JSON files provided by the user
+   - inputs can be bound per stage, not just globally
 
 3. **Upstream artifacts**
    - outputs from earlier stages in the same run
 
 4. **List inputs (for fan-out)**
    - a stage output that represents a list of items
+   - a JSON list file provided by the user
+   - a plain text file where each line is an item
    - the list is the iteration source for map stages
 
 This supports the PRD requirement: “each step can take params, files, or lists.”
@@ -102,6 +106,7 @@ The **Runner** (not the user) is responsible for:
 - passing it to the model in a consistent way
 
 The system must not force users to embed schemas or internal control details inside prompts.
+Prompts should not need to understand the internal structure of list items to iterate over them.
 
 ---
 

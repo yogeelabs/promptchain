@@ -43,6 +43,12 @@ Run a fan-out map stage:
 python -m promptchain.cli run --pipeline pipelines/fanout_personas_jtbd.yaml --topic chess
 ```
 
+Run a map stage from a text list file:
+
+```zsh
+python -m promptchain.cli run --pipeline pipelines/text_list_fanout.yaml
+```
+
 Run the publish example:
 
 ```zsh
@@ -61,6 +67,8 @@ scripts/smoke_three_stage_fanout_classify_per_item.zsh
 scripts/smoke_indian_spices_benefits.zsh
 scripts/smoke_mixed_models.zsh
 scripts/smoke_openai_two_step.zsh
+scripts/smoke_text_list_fanout.zsh
+scripts/smoke_json_list_fanout.zsh
 ```
 
 ## More Documentation

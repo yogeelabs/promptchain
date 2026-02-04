@@ -83,13 +83,17 @@ This enables workflows to scale from simple to complex without rewriting prompts
 
 Each step in a workflow must support:
 - simple input parameters (e.g., topic, goal, question)
-- file‑based inputs (text documents)
+- file‑based inputs (text or JSON)
 - list‑based inputs that enable fan‑out execution
 
 This allows steps to operate on:
 - raw ideas
 - existing text
 - generated lists from earlier steps
+
+Additional requirements:
+- inputs can be provided per stage, not only globally
+- a stage can mix parameters, file inputs, and upstream artifacts in the same step
 
 ---
 
@@ -100,12 +104,27 @@ The product must support workflows where:
 - the next step runs once per list item
 - outputs are produced per item
 
+Fan-out list sources can be:
+- generated lists from earlier steps
+- user-provided lists from JSON files
+- user-provided lists from plain text files (one item per line)
+
+This exists to preserve prompt simplicity while keeping workflows flexible.
+
 Examples:
 - personas → per‑persona JTBD
 - ideas → per‑idea expansion
 - documents → per‑section analysis
 
 Fan‑out must feel **native**, not like a workaround.
+List-based fan‑out must be deterministic, preserving stable ordering and stable identity for each item across runs.
+
+### 5.3.1 Prompt Simplicity Guarantee
+
+Prompts must remain simple and natural:
+- users should not need to reference internal schema keys
+- map steps should support a simple “item placeholder” conceptually
+- prompt authors should not be forced into schema-heavy prompt patterns
 
 ---
 
@@ -201,6 +220,8 @@ The MVP must include:
 - single‑step execution
 - sequential chains
 - fan‑out over lists
+- fan‑out from JSON or plain text list files
+- per‑stage file inputs (text or JSON)
 - per‑step model choice
 - pause / inspect / resume
 - final output separation

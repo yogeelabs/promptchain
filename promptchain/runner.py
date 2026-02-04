@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
-from promptchain.pipeline import Pipeline, Stage
+from promptchain.pipeline import InputFile, Pipeline, Stage
 from promptchain.providers.ollama import OllamaProvider
 from promptchain.providers.openai import OpenAIProvider
 
@@ -52,6 +52,68 @@ def _read_json(path: Path, label: str) -> Any:
         return json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         raise RunnerError(f"{label} contained invalid JSON: {path}") from exc
+
+
+def _resolve_file_path(path: str, pipeline_path: str | Path) -> Path:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    return (Path(pipeline_path).parent / candidate).resolve()
+
+
+def _load_input_files(
+    *,
+    pipeline_path: str | Path,
+    input_files: Mapping[str, InputFile],
+) -> tuple[dict[str, str], dict[str, Any], dict[str, dict[str, Any]]]:
+    inputs_text: dict[str, str] = {}
+    inputs_json: dict[str, Any] = {}
+    inputs_meta: dict[str, dict[str, Any]] = {}
+
+    for name, input_file in input_files.items():
+        resolved_path = _resolve_file_path(input_file.path, pipeline_path)
+        if not resolved_path.exists():
+            raise RunnerError(f"Input file not found: {resolved_path}")
+        inputs_meta[name] = {
+            "path": str(resolved_path),
+            "kind": input_file.kind,
+        }
+        if input_file.kind == "json":
+            parsed = _read_json(resolved_path, f"Input file '{name}'")
+            inputs_json[name] = parsed
+            inputs_text[name] = json.dumps(parsed, indent=2, ensure_ascii=True)
+        else:
+            inputs_text[name] = resolved_path.read_text()
+
+    return inputs_text, inputs_json, inputs_meta
+
+
+def _load_map_items_from_file(
+    *,
+    path: str,
+    pipeline_path: str | Path,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    resolved_path = _resolve_file_path(path, pipeline_path)
+    if not resolved_path.exists():
+        raise RunnerError(f"Map source file not found: {resolved_path}")
+
+    kind = "json" if resolved_path.suffix.lower() == ".json" else "text"
+    if kind == "json":
+        payload = _read_json(resolved_path, "Map source file")
+        normalized = _normalize_json_output(payload)
+        items = normalized["items"]
+    else:
+        raw_text = resolved_path.read_text()
+        lines = [line.strip() for line in raw_text.splitlines()]
+        line_items = [{"value": line} for line in lines if line]
+        normalized = _normalize_json_output(line_items)
+        items = normalized["items"]
+
+    meta = {
+        "path": str(resolved_path),
+        "kind": kind,
+    }
+    return items, meta
 
 
 def _stable_item_id(payload: Mapping[str, Any]) -> str:
@@ -140,6 +202,8 @@ def _build_used_context(
     params: Mapping[str, Any],
     stage_outputs: Mapping[str, str],
     stage_json: Mapping[str, Any],
+    inputs_text: Mapping[str, str] | None = None,
+    inputs_json: Mapping[str, Any] | None = None,
     item: Mapping[str, Any] | None = None,
     item_index: int | None = None,
     item_id: str | None = None,
@@ -147,9 +211,12 @@ def _build_used_context(
     params_used: dict[str, Any] = {}
     stage_outputs_used: dict[str, str] = {}
     stage_json_used: dict[str, Any] = {}
+    inputs_text_used: dict[str, str] = {}
+    inputs_json_used: dict[str, Any] = {}
     item_used: Mapping[str, Any] | None = None
     item_index_used: int | None = None
     item_id_used: str | None = None
+    item_value_used: Any | None = None
     raw_fields: list[str] = []
 
     for field in template_fields:
@@ -163,6 +230,16 @@ def _build_used_context(
             key = field[len("stage_json[") : -1]
             if key in stage_json:
                 stage_json_used[key] = stage_json[key]
+            continue
+        if field.startswith("inputs[") and field.endswith("]"):
+            key = field[len("inputs[") : -1]
+            if inputs_text and key in inputs_text:
+                inputs_text_used[key] = inputs_text[key]
+            continue
+        if field.startswith("inputs_json[") and field.endswith("]"):
+            key = field[len("inputs_json[") : -1]
+            if inputs_json and key in inputs_json:
+                inputs_json_used[key] = inputs_json[key]
             continue
         if field.startswith("item[") and field.endswith("]"):
             if item is not None:
@@ -178,8 +255,18 @@ def _build_used_context(
         if field == "item_id" and item_id is not None:
             item_id_used = item_id
             continue
+        if field == "item_value" and item is not None:
+            item_value_used = item.get("value")
+            continue
         if field in params:
             params_used[field] = params[field]
+            continue
+        if inputs_text and field in inputs_text:
+            inputs_text_used[field] = inputs_text[field]
+            continue
+        if inputs_json and field in inputs_json:
+            inputs_json_used[field] = inputs_json[field]
+            continue
 
     context_used: dict[str, Any] = {
         "params": params_used,
@@ -187,12 +274,18 @@ def _build_used_context(
         "stage_json": stage_json_used,
         "template_fields": raw_fields,
     }
+    if inputs_text_used:
+        context_used["inputs"] = inputs_text_used
+    if inputs_json_used:
+        context_used["inputs_json"] = inputs_json_used
     if item_used is not None:
         context_used["item"] = item_used
     if item_index_used is not None:
         context_used["item_index"] = item_index_used
     if item_id_used is not None:
         context_used["item_id"] = item_id_used
+    if item_value_used is not None:
+        context_used["item_value"] = item_value_used
     return context_used
 
 
@@ -240,7 +333,15 @@ class Runner:
         stage_index: int,
         run_dir: Path,
         params: Mapping[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, str], dict[str, Any]]:
+        stage: Stage,
+    ) -> tuple[
+        dict[str, Any],
+        dict[str, str],
+        dict[str, Any],
+        dict[str, str],
+        dict[str, Any],
+        dict[str, dict[str, Any]],
+    ]:
         stage_outputs: dict[str, str] = {}
         stage_json: dict[str, Any] = {}
         for prior in pipeline.stages[:stage_index]:
@@ -249,10 +350,17 @@ class Runner:
             stage_outputs[prior.stage_id] = output_text
             if output_json is not None:
                 stage_json[prior.stage_id] = output_json
+        inputs_text, inputs_json, inputs_meta = _load_input_files(
+            pipeline_path=pipeline.path,
+            input_files=stage.input_files,
+        )
         context = dict(params)
+        context.update(inputs_text)
         context["stage_outputs"] = stage_outputs
         context["stage_json"] = stage_json
-        return context, stage_outputs, stage_json
+        context["inputs"] = inputs_text
+        context["inputs_json"] = inputs_json
+        return context, stage_outputs, stage_json, inputs_text, inputs_json, inputs_meta
 
     def _run_single_stage(
         self,
@@ -270,9 +378,14 @@ class Runner:
         if _stage_completed(stage, stage_dir):
             return
 
-        context, stage_outputs, stage_json = self._gather_stage_context(
-            pipeline, stage_index, run_dir, params
-        )
+        (
+            context,
+            stage_outputs,
+            stage_json,
+            inputs_text,
+            inputs_json,
+            inputs_meta,
+        ) = self._gather_stage_context(pipeline, stage_index, run_dir, params, stage)
 
         provider = self._get_provider(stage.provider)
         provider.ensure_model(stage.model)
@@ -283,6 +396,8 @@ class Runner:
             params=params,
             stage_outputs=stage_outputs,
             stage_json=stage_json,
+            inputs_text=inputs_text,
+            inputs_json=inputs_json,
         )
         rendered_prompt = _render_prompt(stage.prompt, context)
         stage_meta = {
@@ -303,6 +418,9 @@ class Runner:
                 "rendered_prompt": rendered_prompt,
                 "context_all": {
                     "params": dict(params),
+                    "inputs": inputs_text,
+                    "inputs_json": inputs_json,
+                    "inputs_meta": inputs_meta,
                     "stage_outputs": stage_outputs,
                     "stage_json": stage_json,
                 },
@@ -394,35 +512,54 @@ class Runner:
         if _stage_completed(stage, stage_dir):
             return
 
-        if not stage.map_from:
-            raise RunnerError(f"Map stage '{stage.stage_id}' is missing map_from.")
-
-        map_from = stage.map_from
-        if map_from not in [s.stage_id for s in pipeline.stages]:
-            raise RunnerError(f"Map stage '{stage.stage_id}' references unknown stage '{map_from}'.")
-
-        if map_from not in [s.stage_id for s in pipeline.stages[:stage_index]]:
+        if not stage.map_from and not stage.map_from_file:
             raise RunnerError(
-                f"Map stage '{stage.stage_id}' must reference an upstream stage."
+                f"Map stage '{stage.stage_id}' is missing map_from or map_from_file."
             )
 
-        context, stage_outputs, stage_json = self._gather_stage_context(
-            pipeline, stage_index, run_dir, params
-        )
+        map_from = stage.map_from
+        map_from_file = stage.map_from_file
+        map_source_meta: dict[str, Any] | None = None
+
+        if map_from:
+            if map_from not in [s.stage_id for s in pipeline.stages]:
+                raise RunnerError(
+                    f"Map stage '{stage.stage_id}' references unknown stage '{map_from}'."
+                )
+
+            if map_from not in [s.stage_id for s in pipeline.stages[:stage_index]]:
+                raise RunnerError(
+                    f"Map stage '{stage.stage_id}' must reference an upstream stage."
+                )
+
+        (
+            context,
+            stage_outputs,
+            stage_json,
+            inputs_text,
+            inputs_json,
+            inputs_meta,
+        ) = self._gather_stage_context(pipeline, stage_index, run_dir, params, stage)
 
         provider = self._get_provider(stage.provider)
         provider.ensure_model(stage.model)
 
-        source_payload = stage_json.get(map_from)
-        if not isinstance(source_payload, dict) or "items" not in source_payload:
-            raise RunnerError(
-                f"Map stage '{stage.stage_id}' expects JSON list from '{map_from}'."
+        if map_from_file:
+            items, map_source_meta = _load_map_items_from_file(
+                path=map_from_file,
+                pipeline_path=pipeline.path,
             )
-        items = source_payload.get("items")
-        if not isinstance(items, list):
-            raise RunnerError(
-                f"Map stage '{stage.stage_id}' expects JSON list from '{map_from}'."
-            )
+        else:
+            source_payload = stage_json.get(map_from)
+            if not isinstance(source_payload, dict) or "items" not in source_payload:
+                raise RunnerError(
+                    f"Map stage '{stage.stage_id}' expects JSON list from '{map_from}'."
+                )
+            items = source_payload.get("items")
+            if not isinstance(items, list):
+                raise RunnerError(
+                    f"Map stage '{stage.stage_id}' expects JSON list from '{map_from}'."
+                )
 
         stage_meta = {
             "stage_id": stage.stage_id,
@@ -431,6 +568,7 @@ class Runner:
             "output": stage.output,
             "mode": stage.mode,
             "map_from": map_from,
+            "map_from_file": map_from_file,
             "publish": stage.publish,
             "started_at": _utc_now(),
             "status": "started",
@@ -440,9 +578,14 @@ class Runner:
             stage_dir / "context.json",
             {
                 "map_from": map_from,
+                "map_from_file": map_from_file,
+                "map_from_meta": map_source_meta,
                 "item_count": len(items),
                 "context_all": {
                     "params": dict(params),
+                    "inputs": inputs_text,
+                    "inputs_json": inputs_json,
+                    "inputs_meta": inputs_meta,
                     "stage_outputs": stage_outputs,
                     "stage_json": stage_json,
                 },
@@ -523,6 +666,7 @@ class Runner:
 
             item_context = dict(context)
             item_context["item"] = item
+            item_context["item_value"] = item.get("value")
             item_context["item_index"] = index
             item_context["item_id"] = item_id
 
@@ -532,6 +676,8 @@ class Runner:
                 params=params,
                 stage_outputs=stage_outputs,
                 stage_json=stage_json,
+                inputs_text=inputs_text,
+                inputs_json=inputs_json,
                 item=item,
                 item_index=index,
                 item_id=item_id,
@@ -556,9 +702,13 @@ class Runner:
                     "rendered_prompt": rendered_prompt,
                     "context_all": {
                         "params": dict(params),
+                        "inputs": inputs_text,
+                        "inputs_json": inputs_json,
+                        "inputs_meta": inputs_meta,
                         "stage_outputs": stage_outputs,
                         "stage_json": stage_json,
                         "item": item,
+                        "item_value": item.get("value"),
                         "item_index": index,
                         "item_id": item_id,
                     },
@@ -632,7 +782,14 @@ class Runner:
             1 for entry in manifest_items if entry["status"] == "completed"
         )
         _write_json(stage_dir / "stage.json", stage_meta)
-        _write_json(stage_dir / "output.json", {"items": manifest_items, "map_from": map_from})
+        _write_json(
+            stage_dir / "output.json",
+            {
+                "items": manifest_items,
+                "map_from": map_from,
+                "map_from_file": map_from_file,
+            },
+        )
 
         meta["stages"][stage.stage_id] = {
             "status": stage_meta["status"],

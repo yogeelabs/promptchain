@@ -58,6 +58,9 @@ Activate the local virtual environment first:
 source .venv/bin/activate
 ```
 
+All scripts in `scripts/` must be run with the venv active. If you see
+`ModuleNotFoundError`, stop and re-activate the venv before retrying.
+
 Run these from repo root:
 ```zsh
 scripts/format.zsh

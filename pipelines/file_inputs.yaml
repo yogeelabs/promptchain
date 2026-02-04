@@ -1,0 +1,12 @@
+name: file_inputs
+model: qwen3:8b
+stages:
+  - id: summarize_notes
+    prompt: "Summarize the notes below, using the config as guidance:\n\nNotes:\n{notes}\n\nConfig:\n{config}"
+    inputs:
+      files:
+        notes: inputs/notes.txt
+        config:
+          path: inputs/config.json
+          type: json
+    output: markdown

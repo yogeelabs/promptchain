@@ -1,0 +1,8 @@
+name: text_list_fanout
+model: qwen3:8b
+stages:
+  - id: describe_item
+    mode: map
+    map_from_file: inputs/items.txt
+    prompt: "Write one crisp sentence about: {item_value}"
+    output: markdown

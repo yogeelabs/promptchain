@@ -80,6 +80,38 @@ python -m promptchain.cli run --pipeline pipelines/three_step.yaml --topic chess
 python -m promptchain.cli run --pipeline pipelines/json_then_use.yaml
 ```
 
+### Per-stage file inputs + text list fan-out (Phase 3.5)
+
+Bind a file to a specific stage:
+
+```yaml
+name: file_inputs
+model: qwen3:8b
+stages:
+  - id: summarize_notes
+    prompt: "Summarize the notes below:\n\n{notes}"
+    inputs:
+      files:
+        notes: inputs/notes.txt
+    output: markdown
+```
+
+Fan-out from a plain text list file:
+
+```yaml
+name: text_list_fanout
+model: qwen3:8b
+stages:
+  - id: describe_item
+    mode: map
+    map_from_file: inputs/items.txt
+    prompt: "Write one sentence about: {item_value}"
+    output: markdown
+```
+
+Notes:
+- File paths in `inputs` and `map_from_file` are resolved relative to the pipeline YAML.
+
 ### Run a fan-out map stage (Phase 4)
 
 ```zsh
@@ -187,10 +219,13 @@ Run metadata:
 Prompt templates can reference upstream outputs:
 - `{stage_outputs[stage_id]}` for upstream text
 - `{stage_json[stage_id]}` for upstream JSON
+- file inputs bound to the stage (by name), e.g. `{notes}`
+- file input namespaces: `{inputs[notes]}` and `{inputs_json[config]}`
 
 Map-stage prompt templates can also reference:
 - `{item[...]}` for the current item (e.g., `{item[value]}`)
 - `{item_index}` and `{item_id}`
+- `{item_value}` for the current item's value
 
 `context.json` contains:
 - `rendered_prompt`
@@ -224,4 +259,6 @@ scripts/smoke_three_stage_fanout_classify.zsh
 scripts/smoke_three_stage_fanout_classify_per_item.zsh
 scripts/smoke_indian_spices_benefits.zsh
 scripts/smoke_mixed_models.zsh
+scripts/smoke_text_list_fanout.zsh
+scripts/smoke_json_list_fanout.zsh
 ```

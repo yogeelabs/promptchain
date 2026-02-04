@@ -128,6 +128,27 @@ The guiding rule:
 
 ---
 
+## Phase 3.5 — Per-Stage File Inputs + Text List Fan-Out
+
+**Goal:** Support per-stage file inputs and fan-out from plain text lists.
+
+### Capabilities Delivered
+- Per-stage file inputs (text and JSON)
+- Map over `.txt` list files (newline-separated)
+- Map over `.json` list files
+
+### Sub‑Goals / Tasks
+- [ ] Update pipeline definition docs to describe per-stage inputs
+- [ ] Update sample pipelines to demonstrate per-stage file inputs
+- [ ] Update smoke tests conceptually for text-list fan-out
+
+### Exit Criteria
+- User can attach a file input to any stage
+- User can fan out over a text file list without writing JSON
+- Outputs remain inspectable and resumable
+
+---
+
 ## Phase 4 — Fan-Out (Map Stages)
 
 **Goal:** Enable “for each item…” workflows.

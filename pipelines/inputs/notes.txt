@@ -1,0 +1,3 @@
+PromptChain helps break complex tasks into simple, inspectable stages.
+Local-first execution keeps workflows reproducible and fast.
+Users can pause, edit outputs, and resume without recomputation.

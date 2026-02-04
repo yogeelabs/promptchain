@@ -37,8 +37,22 @@
 ### 5.6 Flexible Inputs Per Step
 
 - Each step in a workflow can accept different types of inputs, such as topics, files, or lists.
+- Users can attach inputs to a specific step without changing earlier or later steps.
+- Each step can take parameters, a text file, or a JSON file depending on the need.
 - This flexibility enables users to tailor each step’s input according to the task.
 - List inputs can be used to fan out a step, running it multiple times with different data.
+- Users can provide their own list file when the pipeline does not produce the exact list they want.
+- Prompts should stay simple and natural, without requiring internal schema language.
+
+### 5.6.1 Per-Step File Inputs (User Stories)
+
+- “I can attach a file to Stage 3 without changing Stage 1 or Stage 2.”
+- “If my pipeline can’t produce the exact list I want, I can provide a file myself.”
+
+### 5.6.2 Fan-Out From Plain Text Lists (User Stories)
+
+- “I can write 5 items in a text file and fan out over them.”
+- “Each line becomes a separate run with its own output.”
 
 ### 5.7 Use Different Models Per Step
 
