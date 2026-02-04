@@ -181,12 +181,29 @@ The provider layer:
 - abstracts model invocation
 - supports local-first model runtimes (starting with Ollama)
 - is structured so additional providers can be added later
+- can be extended with external providers as an optional lane
+- requires explicit configuration when using external providers
 
 The runner must log which model was used per stage for traceability.
 
+### 9.1 External Provider Lane (Optional)
+
+PromptChain can be extended to use external providers (OpenAI or OpenAI‑compatible) without changing the default local‑first behavior.
+External provider usage must be explicitly chosen and clearly logged per stage.
+Failures should surface provider‑specific issues (auth, network, rate limits) in a user‑readable way.
+
 ---
 
-## 10. Orchestration & Resumability
+## 10. Provider Policy
+
+- The default provider is local.
+- External providers are opt‑in only.
+- No implicit fallback from local to cloud; users must choose.
+- Behavior should be deterministic where possible, while acknowledging network variability.
+
+---
+
+## 11. Orchestration & Resumability
 
 The Runner is responsible for:
 - executing stages in order
@@ -203,7 +220,7 @@ Resumability is achieved by:
 
 ---
 
-## 11. Failure Handling
+## 12. Failure Handling
 
 Failures must be recoverable.
 
@@ -217,7 +234,7 @@ This supports the PRD requirement: “failure does not require starting over.”
 
 ---
 
-## 12. Minimal Extensibility Points (MVP-Safe)
+## 13. Minimal Extensibility Points (MVP-Safe)
 
 PromptChain should be designed to grow without redesign:
 
@@ -229,7 +246,7 @@ However, MVP should not implement features beyond the PRD MVP scope.
 
 ---
 
-## 13. What This Architecture Explicitly Avoids
+## 14. What This Architecture Explicitly Avoids
 
 To keep the system aligned with the PRD and prevent complexity creep, the architecture avoids:
 
@@ -241,7 +258,7 @@ To keep the system aligned with the PRD and prevent complexity creep, the archit
 
 ---
 
-## 14. Summary
+## 15. Summary
 
 This architecture implements PromptChain as a small, local-first execution engine where:
 

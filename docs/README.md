@@ -7,6 +7,25 @@ Local-first, inspectable prompt chaining for deliberate multi-step workflows.
 - Ollama running at `http://localhost:11434`
 - Models specified in pipelines pulled in Ollama (e.g., `qwen3:8b`)
 
+### Optional OpenAI Provider (Phase 9)
+
+PromptChain can optionally use the OpenAI API. This is opt-in and does not change the local-first default.
+
+Requirements:
+- `OPENAI_API_KEY` set in the environment
+- Pipeline configured with `provider: openai`
+
+Example:
+```yaml
+name: openai_example
+provider: openai
+model: <openai-model-id>
+stages:
+  - id: draft
+    prompt: "Draft a short summary of {topic}."
+    output: markdown
+```
+
 ### Setup
 
 ```zsh
@@ -96,6 +115,22 @@ stages:
   - id: refine
     model: llama3.1:70b
     prompt: "Refine these angles into a tight brief:\n\n{stage_outputs[brainstorm]}"
+    output: markdown
+```
+
+You can also set a pipeline default `provider` and override per stage:
+```yaml
+name: mixed_providers
+provider: ollama
+model: qwen3:8b
+stages:
+  - id: local
+    prompt: "List five angles for {topic}."
+    output: markdown
+  - id: external
+    provider: openai
+    model: <openai-model-id>
+    prompt: "Refine these angles into a tight brief:\n\n{stage_outputs[local]}"
     output: markdown
 ```
 

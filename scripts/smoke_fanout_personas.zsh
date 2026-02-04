@@ -1,6 +1,13 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
+if [[ -f .env ]]; then
+  set -a
+  source .env
+  set +a
+fi
+
+
 PIPELINE="pipelines/fanout_personas_jtbd.yaml"
 LIST_STAGE="personas"
 MAP_STAGE="jtbd"

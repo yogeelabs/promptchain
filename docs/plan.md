@@ -236,6 +236,33 @@ The guiding rule:
 
 ---
 
+## Phase 9 — External Providers (Optional): OpenAI + OpenAI-Compatible
+
+**Goal:** Enable optional use of external providers without affecting existing local-first workflows.
+
+### Capabilities Delivered
+- Support OpenAI provider
+- Support OpenAI-compatible provider (LM Studio / vLLM / other compatible servers)
+- Provider choice per stage remains consistent with Phase 6 (per-stage model selection)
+- Traceability and clear failure messages for external calls
+
+### Sub‑Goals / Tasks
+- [ ] Document provider configuration expectations (high level; env vars ok)
+- [ ] Add explicit “opt-in external provider” guidance to README (optional addendum)
+- [ ] Ensure plan includes “no cloud required” as an invariant
+- [ ] Add conceptual acceptance tests (smoke scripts) for external providers
+
+### Exit Criteria
+- Docs clearly state external providers are optional
+- Acceptance criteria are unambiguous:
+  - can run a pipeline using an external provider
+  - can mix providers across stages
+  - logs show provider/model used
+  - failures are explainable and recoverable
+- No changes to MVP scope or earlier phase definitions
+
+---
+
 ## Summary Roadmap
 
 | Phase | Focus |
@@ -249,6 +276,7 @@ The guiding rule:
 | 6 | Multi-model |
 | 7 | Output separation |
 | 8 | Hardening |
+| 9 | Optional external providers |
 
 ---
 

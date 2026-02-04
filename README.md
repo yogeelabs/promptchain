@@ -7,6 +7,14 @@ Local-first, inspectable prompt chaining for deliberate multi-step workflows.
 - Ollama running at `http://localhost:11434`
 - Models specified in pipelines pulled in Ollama (e.g., `qwen3:8b`)
 
+## Optional OpenAI Provider (Phase 9)
+
+PromptChain can optionally use the OpenAI API. This is opt-in and does not change the local-first default.
+
+Requirements:
+- `OPENAI_API_KEY` set in the environment
+- Pipeline configured with `provider: openai`
+
 ## Setup
 
 ```zsh
@@ -52,6 +60,7 @@ scripts/smoke_three_stage_fanout_classify.zsh
 scripts/smoke_three_stage_fanout_classify_per_item.zsh
 scripts/smoke_indian_spices_benefits.zsh
 scripts/smoke_mixed_models.zsh
+scripts/smoke_openai_two_step.zsh
 ```
 
 ## More Documentation

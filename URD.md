@@ -50,6 +50,12 @@
 - After each step, users can review, edit, or apply filters to the output before moving on.
 - This ensures quality control and allows adjustments mid-workflow.
 
+### 5.9 Optional External Models
+
+- Users can choose to use an external model provider if they want.
+- External usage must be explicit and controllable.
+- The tool must still work fully without external providers.
+
 ## 6. Execution Experience
 
 ### 6.1 Intuitive Run Controls
@@ -66,3 +72,13 @@
 
 - Users want their final deliverables separated from intermediate files and artifacts.
 - Final outputs are organized in a clear, easy-to-find location for convenience and clarity.
+
+### 6.4 External Provider Transparency
+
+- Users can see which provider and model was used.
+- Users can tell when external connectivity is required.
+- Failures clearly indicate why they happened (network, auth, or rate limits).
+
+## 7. Non-Requirements
+
+- PromptChain does not manage billing or optimize external model costs in the MVP; those are user-managed.

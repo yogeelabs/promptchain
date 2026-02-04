@@ -1,6 +1,13 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
+if [[ -f .env ]]; then
+  set -a
+  source .env
+  set +a
+fi
+
+
 PIPELINE="pipelines/publish_list_map_map.yaml"
 LIST_STAGE="ideas"
 MAP_STAGE="drafts"

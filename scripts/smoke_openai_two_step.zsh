@@ -8,8 +8,14 @@ if [[ -f .env ]]; then
 fi
 
 
-PIPELINE="pipelines/three_step.yaml"
-STAGE_IDS=("brainstorm" "expand" "summarize")
+PIPELINE="pipelines/openai_two_step.yaml"
+STAGE_ONE="brainstorm"
+STAGE_TWO="refine"
+
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+  echo "Smoke check skipped: OPENAI_API_KEY is not set" >&2
+  exit 1
+fi
 
 if command -v python >/dev/null 2>&1; then
   PYTHON_BIN="python"
@@ -25,7 +31,7 @@ if [[ ! -f "$PIPELINE" ]]; then
   exit 1
 fi
 
-OUTPUT=$($PYTHON_BIN -m promptchain.cli run --pipeline "$PIPELINE" --topic pytorch 2>&1) || {
+OUTPUT=$($PYTHON_BIN -m promptchain.cli run --pipeline "$PIPELINE" --topic robotics 2>&1) || {
   echo "Smoke check failed: promptchain run failed" >&2
   echo "$OUTPUT" >&2
   exit 1
@@ -48,23 +54,24 @@ if [[ ! -f "$RUN_DIR/run.json" ]]; then
   exit 1
 fi
 
-for STAGE_ID in "${STAGE_IDS[@]}"; do
-  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/raw.txt" ]]; then
-    echo "Smoke check failed: raw.txt missing for stage $STAGE_ID" >&2
-    exit 1
-  fi
-  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/output.md" ]]; then
-    echo "Smoke check failed: output.md missing for stage $STAGE_ID" >&2
-    exit 1
-  fi
-  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/context.json" ]]; then
-    echo "Smoke check failed: context.json missing for stage $STAGE_ID" >&2
-    exit 1
-  fi
-  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/stage.json" ]]; then
-    echo "Smoke check failed: stage.json missing for stage $STAGE_ID" >&2
-    exit 1
-  fi
-done
+if [[ ! -f "$RUN_DIR/stages/$STAGE_ONE/raw.txt" ]]; then
+  echo "Smoke check failed: $STAGE_ONE raw.txt missing" >&2
+  exit 1
+fi
+
+if [[ ! -f "$RUN_DIR/stages/$STAGE_ONE/output.md" ]]; then
+  echo "Smoke check failed: $STAGE_ONE output.md missing" >&2
+  exit 1
+fi
+
+if [[ ! -f "$RUN_DIR/stages/$STAGE_TWO/raw.txt" ]]; then
+  echo "Smoke check failed: $STAGE_TWO raw.txt missing" >&2
+  exit 1
+fi
+
+if [[ ! -f "$RUN_DIR/stages/$STAGE_TWO/output.md" ]]; then
+  echo "Smoke check failed: $STAGE_TWO output.md missing" >&2
+  exit 1
+fi
 
 echo "Smoke check passed: $RUN_DIR"

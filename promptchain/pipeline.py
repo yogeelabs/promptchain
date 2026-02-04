@@ -11,6 +11,7 @@ import yaml
 class Stage:
     stage_id: str
     prompt: str
+    provider: str
     model: str
     output: str  # "markdown" or "json"
     mode: str  # "single" or "map"
@@ -21,6 +22,7 @@ class Stage:
 @dataclass
 class Pipeline:
     name: str
+    provider: str
     model: str
     stages: list[Stage]
     path: str
@@ -42,6 +44,15 @@ def _require_bool(value: Any, field: str) -> bool:
     return value
 
 
+def _require_provider(value: Any, field: str) -> str:
+    provider = _require_str(value, field).lower()
+    if provider not in {"ollama", "openai"}:
+        raise PipelineError(
+            f"Field '{field}' must be 'ollama' or 'openai', got '{provider}'."
+        )
+    return provider
+
+
 def load_pipeline(path: str | Path) -> Pipeline:
     path = Path(path)
     if not path.exists():
@@ -52,6 +63,7 @@ def load_pipeline(path: str | Path) -> Pipeline:
         raise PipelineError("Pipeline YAML must be a mapping.")
 
     name = _require_str(data.get("name", path.stem), "name")
+    provider = _require_provider(data.get("provider", "ollama"), "provider")
     model = _require_str(data.get("model", ""), "model")
 
     stages_raw = data.get("stages")
@@ -64,6 +76,8 @@ def load_pipeline(path: str | Path) -> Pipeline:
             raise PipelineError(f"Stage {idx} must be a mapping.")
         stage_id = _require_str(stage_raw.get("id", f"stage_{idx}"), "stages.id")
         prompt = _require_str(stage_raw.get("prompt", ""), f"stages[{stage_id}].prompt")
+        stage_provider = stage_raw.get("provider", provider)
+        stage_provider = _require_provider(stage_provider, f"stages[{stage_id}].provider")
         stage_model = stage_raw.get("model", model)
         stage_model = _require_str(stage_model, f"stages[{stage_id}].model")
         output = stage_raw.get("output", "markdown")
@@ -91,6 +105,7 @@ def load_pipeline(path: str | Path) -> Pipeline:
             Stage(
                 stage_id=stage_id,
                 prompt=prompt,
+                provider=stage_provider,
                 model=stage_model,
                 output=output,
                 mode=mode,
@@ -99,4 +114,10 @@ def load_pipeline(path: str | Path) -> Pipeline:
             )
         )
 
-    return Pipeline(name=name, model=model, stages=stages, path=str(path))
+    return Pipeline(
+        name=name,
+        provider=provider,
+        model=model,
+        stages=stages,
+        path=str(path),
+    )

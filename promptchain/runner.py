@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from promptchain.pipeline import Pipeline, Stage
 from promptchain.providers.ollama import OllamaProvider
+from promptchain.providers.openai import OpenAIProvider
 
 
 class RunnerError(RuntimeError):
@@ -218,7 +219,20 @@ def _stage_publish_enabled(pipeline: Pipeline) -> list[Stage]:
 class Runner:
     def __init__(self, runs_root: Path | str = "runs") -> None:
         self.runs_root = Path(runs_root)
-        self.provider = OllamaProvider()
+        self._providers: dict[str, Any] = {}
+
+    def _get_provider(self, name: str):
+        provider = self._providers.get(name)
+        if provider is not None:
+            return provider
+        if name == "ollama":
+            provider = OllamaProvider()
+        elif name == "openai":
+            provider = OpenAIProvider()
+        else:
+            raise RunnerError(f"Unknown provider: {name}")
+        self._providers[name] = provider
+        return provider
 
     def _gather_stage_context(
         self,
@@ -260,7 +274,8 @@ class Runner:
             pipeline, stage_index, run_dir, params
         )
 
-        self.provider.ensure_model(stage.model)
+        provider = self._get_provider(stage.provider)
+        provider.ensure_model(stage.model)
 
         template_fields = _extract_template_fields(stage.prompt)
         used_context = _build_used_context(
@@ -272,6 +287,7 @@ class Runner:
         rendered_prompt = _render_prompt(stage.prompt, context)
         stage_meta = {
             "stage_id": stage.stage_id,
+            "provider": stage.provider,
             "model": stage.model,
             "output": stage.output,
             "mode": stage.mode,
@@ -296,11 +312,19 @@ class Runner:
         meta["stages"][stage.stage_id] = {
             "status": "started",
             "started_at": stage_meta["started_at"],
+            "provider": stage.provider,
+            "model": stage.model,
         }
         _write_json(run_dir / "run.json", meta)
-        _append_log(run_dir, f"stage:{stage.stage_id} status=started mode={stage.mode}")
+        _append_log(
+            run_dir,
+            (
+                f"stage:{stage.stage_id} status=started mode={stage.mode} "
+                f"provider={stage.provider} model={stage.model}"
+            ),
+        )
 
-        response_text = self.provider.generate(model=stage.model, prompt=rendered_prompt)
+        response_text = provider.generate(model=stage.model, prompt=rendered_prompt)
         (stage_dir / "raw.txt").write_text(response_text)
 
         if stage.output == "json":
@@ -342,9 +366,17 @@ class Runner:
         meta["stages"][stage.stage_id] = {
             "status": "completed",
             "completed_at": stage_meta["completed_at"],
+            "provider": stage.provider,
+            "model": stage.model,
         }
         _write_json(run_dir / "run.json", meta)
-        _append_log(run_dir, f"stage:{stage.stage_id} status=completed")
+        _append_log(
+            run_dir,
+            (
+                f"stage:{stage.stage_id} status=completed "
+                f"provider={stage.provider} model={stage.model}"
+            ),
+        )
 
     def _run_map_stage(
         self,
@@ -378,7 +410,8 @@ class Runner:
             pipeline, stage_index, run_dir, params
         )
 
-        self.provider.ensure_model(stage.model)
+        provider = self._get_provider(stage.provider)
+        provider.ensure_model(stage.model)
 
         source_payload = stage_json.get(map_from)
         if not isinstance(source_payload, dict) or "items" not in source_payload:
@@ -393,6 +426,7 @@ class Runner:
 
         stage_meta = {
             "stage_id": stage.stage_id,
+            "provider": stage.provider,
             "model": stage.model,
             "output": stage.output,
             "mode": stage.mode,
@@ -417,11 +451,16 @@ class Runner:
         meta["stages"][stage.stage_id] = {
             "status": "started",
             "started_at": stage_meta["started_at"],
+            "provider": stage.provider,
+            "model": stage.model,
         }
         _write_json(run_dir / "run.json", meta)
         _append_log(
             run_dir,
-            f"stage:{stage.stage_id} status=started mode={stage.mode} map_from={map_from}",
+            (
+                f"stage:{stage.stage_id} status=started mode={stage.mode} map_from={map_from} "
+                f"provider={stage.provider} model={stage.model}"
+            ),
         )
 
         items_root = stage_dir / "items"
@@ -500,6 +539,7 @@ class Runner:
             rendered_prompt = _render_prompt(stage.prompt, item_context)
             item_meta = {
                 "stage_id": stage.stage_id,
+                "provider": stage.provider,
                 "model": stage.model,
                 "output": stage.output,
                 "item_id": item_id,
@@ -527,7 +567,7 @@ class Runner:
             )
 
             try:
-                response_text = self.provider.generate(
+                response_text = provider.generate(
                     model=stage.model, prompt=rendered_prompt
                 )
                 (item_dir / "raw.txt").write_text(response_text)
@@ -600,6 +640,8 @@ class Runner:
             "items_completed": stage_meta["items_completed"],
             "items_failed": stage_meta["items_failed"],
             "items_skipped": stage_meta["items_skipped"],
+            "provider": stage.provider,
+            "model": stage.model,
         }
         _write_json(run_dir / "run.json", meta)
         _append_log(
@@ -609,7 +651,8 @@ class Runner:
                 f"{stage.stage_id} status={stage_meta['status']} "
                 f"items_completed={stage_meta['items_completed']} "
                 f"items_failed={stage_meta['items_failed']} "
-                f"items_skipped={stage_meta['items_skipped']}"
+                f"items_skipped={stage_meta['items_skipped']} "
+                f"provider={stage.provider} model={stage.model}"
             ),
         )
 
@@ -704,6 +747,7 @@ class Runner:
             meta = {
                 "run_id": run_id,
                 "pipeline": pipeline.name,
+                "pipeline_provider": pipeline.provider,
                 "pipeline_model": pipeline.model,
                 "pipeline_path": str(getattr(pipeline, "path", "")),
                 "params": dict(params),

@@ -1,6 +1,13 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
+if [[ -f .env ]]; then
+  set -a
+  source .env
+  set +a
+fi
+
+
 PIPELINE="pipelines/json_list.yaml"
 STAGE_ID="list_items"
 

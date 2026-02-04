@@ -1,6 +1,13 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
+if [[ -f .env ]]; then
+  set -a
+  source .env
+  set +a
+fi
+
+
 PIPELINE="pipelines/indian_spices_benefits.yaml"
 LIST_STAGE="list_spices"
 MAP_STAGE="spice_benefits"

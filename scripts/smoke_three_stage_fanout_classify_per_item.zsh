@@ -1,6 +1,13 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
+if [[ -f .env ]]; then
+  set -a
+  source .env
+  set +a
+fi
+
+
 PIPELINE="pipelines/three_stage_fanout_classify_per_item.yaml"
 LIST_STAGE="list_items"
 MAP_STAGE="expand_item"

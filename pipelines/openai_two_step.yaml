@@ -1,0 +1,10 @@
+name: openai_two_step
+provider: openai
+model: gpt-4o-mini
+stages:
+  - id: brainstorm
+    prompt: "List five angles for {topic}."
+    output: markdown
+  - id: refine
+    prompt: "Refine these angles into a tight brief:\n\n{stage_outputs[brainstorm]}"
+    output: markdown

@@ -1,0 +1,12 @@
+name: mixed_providers
+provider: ollama
+model: qwen3:8b
+stages:
+  - id: brainstorm
+    prompt: "List five angles for {topic}."
+    output: markdown
+  - id: refine
+    provider: openai
+    model: gpt-4o-mini
+    prompt: "Refine these angles into a tight brief:\n\n{stage_outputs[brainstorm]}"
+    output: markdown

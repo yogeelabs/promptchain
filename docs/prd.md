@@ -62,6 +62,7 @@ PromptChain addresses the following core problems:
 - UI/dashboard (CLI‑first)
 - Markdown → structured data syncing
 - Cloud dependency by default
+- External providers as a default requirement (optional extension in Phase 9)
 
 ---
 
@@ -156,6 +157,16 @@ Users should be able to:
 - quickly locate final results
 - archive or share outputs without extra cleanup
 
+### 5.8 Optional External Provider Support
+
+The product should allow users to opt in to external providers (OpenAI and OpenAI‑compatible) without changing the local‑first default.
+
+This must ensure:
+- external providers are explicitly chosen by the user
+- provider and model are recorded for traceability
+- workflows behave the same (single, sequential, fan‑out)
+- prompt‑writing requirements remain unchanged
+
 ---
 
 ## 6. Execution Experience
@@ -193,6 +204,7 @@ The MVP must include:
 - per‑step model choice
 - pause / inspect / resume
 - final output separation
+- local‑first workflows with Ollama as the default provider
 
 The MVP must **not** include:
 - reduce/merge steps
@@ -200,6 +212,7 @@ The MVP must **not** include:
 - UI
 - document ingestion
 - review automation
+- external providers as a requirement for completion (Phase 9 is post‑MVP)
 
 ---
 
