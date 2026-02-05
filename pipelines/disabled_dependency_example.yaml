@@ -1,0 +1,12 @@
+name: disabled_dependency_example
+model: qwen3:8b
+stages:
+  - id: list_items
+    enabled: false
+    prompt: "Return a JSON list of two items about {topic}. JSON only."
+    output: json
+  - id: use_items
+    mode: map
+    map_from: list_items
+    prompt: "Write one sentence about {item[value]}."
+    output: markdown

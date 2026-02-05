@@ -1,0 +1,15 @@
+name: openai_concurrent_map
+provider: openai
+model: gpt-5.2-2025-12-11
+stages:
+  - id: list_items
+    prompt: "Return a JSON list of five short topics about {topic}. JSON only."
+    output: json
+  - id: expand_items
+    mode: map
+    map_from: list_items
+    concurrency:
+      enabled: true
+      max_in_flight: 3
+    prompt: "Write one sentence about {item[value]}."
+    output: markdown

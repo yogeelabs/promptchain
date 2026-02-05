@@ -234,6 +234,14 @@ Resumability is achieved by:
 - clear stage completion markers in run metadata
 - non-destructive failure handling
 
+### 11.1 Stage Enable / Disable
+
+The runner must:
+- respect `enabled: true|false` per stage (default enabled)
+- skip disabled stages deterministically and record the skip reason
+- log a clear skip message for disabled stages
+- fail fast if an enabled stage depends on a disabled stage, with a clear error message
+
 ---
 
 ## 12. Failure Handling
@@ -292,7 +300,20 @@ The system supports two execution modes:
 
 ---
 
-## 14. Minimal Extensibility Points (MVP-Safe)
+## 14. Concurrency Model (Serial vs Concurrent)
+
+High-level responsibilities:
+- The runner may execute independent work units concurrently (primarily map items).
+- Concurrency is bounded and opt-in.
+- Dependency order is preserved: stages do not run ahead of prerequisites.
+- Artifact writing remains deterministic (paths based on item identity, not completion order).
+- Logging captures concurrency settings and per-item outcomes.
+- Provider-specific throttling or limit errors are surfaced clearly.
+- Deliverables remain isolated in `output/`; support artifacts stay in logs/support.
+
+---
+
+## 15. Minimal Extensibility Points (MVP-Safe)
 
 PromptChain should be designed to grow without redesign:
 
@@ -304,7 +325,7 @@ However, MVP should not implement features beyond the PRD MVP scope.
 
 ---
 
-## 15. What This Architecture Explicitly Avoids
+## 16. What This Architecture Explicitly Avoids
 
 To keep the system aligned with the PRD and prevent complexity creep, the architecture avoids:
 
@@ -316,7 +337,7 @@ To keep the system aligned with the PRD and prevent complexity creep, the archit
 
 ---
 
-## 16. Summary
+## 17. Summary
 
 This architecture implements PromptChain as a small, local-first execution engine where:
 

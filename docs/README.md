@@ -118,6 +118,18 @@ Notes:
 python -m promptchain.cli run --pipeline pipelines/fanout_personas_jtbd.yaml --topic chess
 ```
 
+Optional concurrency for cloud providers (Phase 11) can speed up large map stages. Serial remains the default, and concurrency is distinct from batch mode:
+```yaml
+  - id: expand_items
+    mode: map
+    map_from: list_items
+    concurrency:
+      enabled: true
+      max_in_flight: 4
+    prompt: "Write one sentence about {item[value]}."
+    output: markdown
+```
+
 ### Human-in-the-loop editing & resume (Phase 5)
 
 Pause after a stage, edit outputs, then resume downstream without recomputation:

@@ -84,6 +84,14 @@
 - Users can see which steps have completed and view detailed logs.
 - This helps in understanding workflow behavior and troubleshooting.
 - Logs and metadata show which provider, model, and reasoning level were used per step.
+- Logs and metadata show when a step was skipped because it was disabled.
+
+### 6.2.1 Stage Enable / Disable
+
+- Each stage may be enabled or disabled in the pipeline YAML (default enabled).
+- Users can disable stages to control what runs without deleting configuration.
+- Disabled stages are skipped deterministically and recorded with reason: “disabled in pipeline yaml”.
+- If a stage depends on a disabled stage, execution fails with a clear message identifying the disabled dependency.
 
 ### 6.3 Final Outputs in a Dedicated Output Location
 
@@ -107,6 +115,16 @@
 - Users can retry only failed or missing items without restarting the full run.
 - Final outputs remain easy to locate and separate from intermediate/support artifacts.
 - Users can always see which execution mode was used for a run.
+
+### 6.6 Faster Runs via Concurrency (Optional)
+
+- Users can choose between serial (default) and concurrent execution when using cloud providers.
+- Users can speed up large fan-out workflows by running multiple items at once.
+- Users can set or choose a concurrency limit.
+- Users can see clear status and errors per item.
+- Users can retry failed items without restarting the entire run.
+- Results are organized the same way as serial runs.
+- Logs and metadata show when concurrency was used.
 
 ## 7. Non-Requirements
 

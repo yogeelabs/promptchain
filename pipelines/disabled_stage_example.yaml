@@ -1,0 +1,10 @@
+name: disabled_stage_example
+model: qwen3:8b
+stages:
+  - id: intro
+    enabled: false
+    prompt: "Write one sentence about {topic}."
+    output: markdown
+  - id: summary
+    prompt: "Write a short summary about {topic}."
+    output: markdown

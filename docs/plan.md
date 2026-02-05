@@ -101,6 +101,8 @@ The guiding rule:
 - User can run a 3-step chain
 - User can stop after step 1, inspect output, then resume
 - Earlier outputs are reused, not recomputed
+- Disabled stages are skipped and recorded
+- Dependency-disabled failure message is explicit
 
 ---
 
@@ -331,6 +333,35 @@ Enable cost-optimized execution for large fan-out workloads using provider batch
 
 ---
 
+## Phase 11 — Concurrent Cloud Execution (Parallel Requests, Not Batch)
+
+### Goal
+Speed up cloud-backed runs by executing multiple independent requests concurrently, while preserving determinism and artifact structure.
+
+### Capabilities Delivered
+- Serial vs concurrent run mode (concurrency opt-in)
+- Bounded concurrency limit
+- Primarily parallelize map-stage item processing
+- Clear per-item status + failures
+- Deterministic artifact layout unaffected by completion order
+- Retry failed/missing items without restarting
+
+### Sub-Goals / Tasks
+- [ ] Define what is safe to parallelize (map items; not dependent stages)
+- [ ] Define concurrency configuration surface (high-level)
+- [ ] Define logging/metadata requirements (mode + limit)
+- [ ] Define throttling behavior expectations (clear errors, recoverability)
+- [ ] Ensure artifact parity guarantee with serial execution
+- [ ] Update sample pipeline guidance to mention concurrency for large fan-outs
+
+### Exit Criteria
+- Docs clearly differentiate concurrency vs batch mode
+- Docs state concurrency preserves identical artifacts as serial runs
+- Concurrency settings are visible in metadata/logs
+- Partial failures are recoverable (retry subset)
+
+---
+
 ## Summary Roadmap
 
 | Phase | Focus |
@@ -346,6 +377,7 @@ Enable cost-optimized execution for large fan-out workloads using provider batch
 | 8 | Hardening |
 | 9 | Optional external providers |
 | 10 | Batch execution mode |
+| 11 | Concurrent cloud execution |
 
 ---
 

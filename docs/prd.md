@@ -142,6 +142,16 @@ This ensures:
 
 ---
 
+### 5.4.1 Stage Enable / Disable
+
+The product must allow:
+- enabling or disabling a stage via `enabled: true|false` in the pipeline YAML (default enabled)
+- skipping disabled stages deterministically without deleting configuration
+- recording skipped stages with reason: “disabled in pipeline yaml”
+- failing fast when an enabled stage depends on a disabled stage, with a clear error message
+
+---
+
 ### 5.5 Per‑Step Model Selection
 
 The product must allow:
@@ -204,6 +214,18 @@ Key product guarantees:
   - run metadata records execution mode
   - logs indicate provider and processing method
 
+### 5.10 Concurrent Execution (Optional, Provider-Specific)
+
+- The product supports concurrent execution of independent requests to speed up runs.
+- Most relevant for map/fan-out stages.
+- Concurrency is bounded by a user-configurable limit.
+- Concurrency does not change workflow semantics or artifact structure.
+- Failures are isolated per item and recoverable.
+
+Clarifications:
+- Serial execution remains the default.
+- Concurrency is distinct from batch mode (which optimizes cost via submit/collect).
+
 ---
 
 ## 6. Execution Experience
@@ -254,6 +276,7 @@ The MVP must **not** include:
 - external providers as a requirement for completion (Phase 9 is post‑MVP)
   - OpenAI provider is optional and not required for MVP
 - batch execution (Phase 10 is post‑MVP)
+- concurrent execution (Phase 11 is post‑MVP)
 
 ---
 

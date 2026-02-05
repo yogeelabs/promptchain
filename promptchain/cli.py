@@ -42,6 +42,11 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--from-stage", help="Start execution from a stage id")
     run_parser.add_argument("--stop-after", help="Stop execution after a stage id")
     run_parser.add_argument("--stage", help="Run only a single stage id")
+    run_parser.add_argument(
+        "--concurrency",
+        type=int,
+        help="Override max in-flight requests for map stages (OpenAI only).",
+    )
 
     return parser
 
@@ -64,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
                 start_stage=args.from_stage,
                 stop_after=args.stop_after,
                 stage_only=args.stage,
+                concurrency_override=args.concurrency,
             )
             print(f"run_dir: {run_dir}")
             return 0

@@ -7,5 +7,6 @@ stages:
   - id: jtbd
     mode: map
     map_from: personas
+    # enabled: false
     prompt: "For persona {item[value]}, write one clear JTBD statement about {topic}."
     output: markdown

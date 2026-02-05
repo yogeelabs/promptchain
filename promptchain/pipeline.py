@@ -15,6 +15,9 @@ class Stage:
     model: str
     reasoning_effort: str | None
     temperature: float | None
+    enabled: bool
+    concurrency_enabled: bool
+    concurrency_max_in_flight: int | None
     output: str  # "markdown" or "json"
     mode: str  # "single" or "map"
     map_from: str | None
@@ -94,6 +97,12 @@ def _require_mapping(value: Any, field: str) -> dict[str, Any]:
     return value
 
 
+def _require_int(value: Any, field: str) -> int:
+    if not isinstance(value, int):
+        raise PipelineError(f"Field '{field}' must be an integer.")
+    return value
+
+
 def _parse_input_file(name: str, value: Any, field: str) -> InputFile:
     if isinstance(value, str):
         path = value
@@ -155,6 +164,8 @@ def load_pipeline(path: str | Path) -> Pipeline:
             stage_raw.get("temperature", temperature),
             f"stages[{stage_id}].temperature",
         )
+        enabled = stage_raw.get("enabled", True)
+        enabled = _require_bool(enabled, f"stages[{stage_id}].enabled")
         output = stage_raw.get("output", "markdown")
         output = _require_str(output, f"stages[{stage_id}].output").lower()
         if output not in {"markdown", "json"}:
@@ -167,6 +178,31 @@ def load_pipeline(path: str | Path) -> Pipeline:
             raise PipelineError(
                 f"Stage '{stage_id}' mode must be 'single' or 'map', got '{mode}'."
             )
+        concurrency_enabled = False
+        concurrency_max_in_flight: int | None = None
+        concurrency_raw = stage_raw.get("concurrency")
+        if concurrency_raw is not None:
+            if mode != "map":
+                raise PipelineError(
+                    f"Stage '{stage_id}' concurrency is only valid for map stages."
+                )
+            concurrency_cfg = _require_mapping(
+                concurrency_raw, f"stages[{stage_id}].concurrency"
+            )
+            concurrency_enabled = _require_bool(
+                concurrency_cfg.get("enabled", False),
+                f"stages[{stage_id}].concurrency.enabled",
+            )
+            max_in_flight_raw = concurrency_cfg.get("max_in_flight")
+            if max_in_flight_raw is not None:
+                max_in_flight = _require_int(
+                    max_in_flight_raw, f"stages[{stage_id}].concurrency.max_in_flight"
+                )
+                if max_in_flight < 1:
+                    raise PipelineError(
+                        f"Field 'stages[{stage_id}].concurrency.max_in_flight' must be >= 1."
+                    )
+                concurrency_max_in_flight = max_in_flight
         map_from = stage_raw.get("map_from")
         map_from_file = stage_raw.get("map_from_file")
         if mode == "map":
@@ -217,6 +253,9 @@ def load_pipeline(path: str | Path) -> Pipeline:
                 model=stage_model,
                 reasoning_effort=stage_reasoning_effort,
                 temperature=stage_temperature,
+                enabled=enabled,
+                concurrency_enabled=concurrency_enabled,
+                concurrency_max_in_flight=concurrency_max_in_flight,
                 output=output,
                 mode=mode,
                 map_from=map_from,

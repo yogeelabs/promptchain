@@ -5,6 +5,8 @@ import json
 import re
 import shutil
 import string
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -44,8 +46,16 @@ def _append_log(run_dir: Path, message: str) -> None:
     timestamp = _utc_now()
     log_path = run_dir / "run.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8", errors="ignore") as handle:
-        handle.write(f"[{timestamp}] {message}\n")
+    with _LOG_LOCK:
+        with log_path.open("a", encoding="utf-8", errors="ignore") as handle:
+            handle.write(f"[{timestamp}] {message}\n")
+
+
+_LOG_LOCK = threading.Lock()
+
+
+def _write_stage_meta(run_dir: Path, stage_id: str, payload: dict[str, Any]) -> None:
+    _write_json(run_dir / f"{stage_id}.meta.json", payload)
 
 
 def _logs_dir(run_dir: Path) -> Path:
@@ -268,6 +278,18 @@ def _extract_template_fields(template: str) -> list[str]:
     return fields
 
 
+def _stage_dependencies(stage: Stage) -> set[str]:
+    deps: set[str] = set()
+    if stage.mode == "map" and stage.map_from:
+        deps.add(stage.map_from)
+    for field in _extract_template_fields(stage.prompt):
+        if field.startswith("stage_outputs[") and field.endswith("]"):
+            deps.add(field[len("stage_outputs[") : -1])
+        elif field.startswith("stage_json[") and field.endswith("]"):
+            deps.add(field[len("stage_json[") : -1])
+    return deps
+
+
 def _build_used_context(
     template_fields: list[str],
     params: Mapping[str, Any],
@@ -374,10 +396,13 @@ def _relative_path(path: Path, root: Path) -> str:
 
 
 def _stage_publish_enabled(pipeline: Pipeline) -> list[Stage]:
-    publish_stages = [stage for stage in pipeline.stages if stage.publish]
+    publish_stages = [stage for stage in pipeline.stages if stage.publish and stage.enabled]
     if publish_stages:
         return publish_stages
-    return [pipeline.stages[-1]]
+    for stage in reversed(pipeline.stages):
+        if stage.enabled:
+            return [stage]
+    return []
 
 
 class Runner:
@@ -416,6 +441,8 @@ class Runner:
         stage_outputs: dict[str, str] = {}
         stage_json: dict[str, Any] = {}
         for prior in pipeline.stages[:stage_index]:
+            if not prior.enabled:
+                continue
             prior_dir = run_dir / "stages" / prior.stage_id
             output_text, output_json = _load_stage_output(prior, prior_dir)
             stage_outputs[prior.stage_id] = output_text
@@ -477,6 +504,7 @@ class Runner:
             "model": stage.model,
             "temperature": stage.temperature,
             "reasoning_effort": stage.reasoning_effort,
+            "enabled": stage.enabled,
             "output": stage.output,
             "mode": stage.mode,
             "publish": stage.publish,
@@ -518,6 +546,7 @@ class Runner:
             "model": stage.model,
             "temperature": stage.temperature,
             "reasoning_effort": stage.reasoning_effort,
+            "enabled": stage.enabled,
         }
         _write_json(run_dir / "run.json", meta)
         _append_log(
@@ -574,6 +603,7 @@ class Runner:
                 stage_meta["status"] = "failed"
                 stage_meta["failed_at"] = _utc_now()
                 _write_json(stage_dir / "stage.json", stage_meta)
+                _write_stage_meta(run_dir, stage.stage_id, stage_meta)
                 meta["stages"][stage.stage_id] = {
                     "status": "failed",
                     "failed_at": stage_meta["failed_at"],
@@ -581,6 +611,7 @@ class Runner:
                     "error_path": _relative_path(error_path, run_dir),
                     "temperature": stage.temperature,
                     "reasoning_effort": stage.reasoning_effort,
+                    "enabled": stage.enabled,
                 }
                 meta["status"] = "failed"
                 meta["error"] = f"Stage '{stage.stage_id}' output was not valid JSON list."
@@ -598,6 +629,7 @@ class Runner:
         stage_meta["completed_at"] = _utc_now()
         stage_meta["status"] = "completed"
         _write_json(stage_dir / "stage.json", stage_meta)
+        _write_stage_meta(run_dir, stage.stage_id, stage_meta)
         meta["stages"][stage.stage_id] = {
             "status": "completed",
             "completed_at": stage_meta["completed_at"],
@@ -605,6 +637,7 @@ class Runner:
             "model": stage.model,
             "temperature": stage.temperature,
             "reasoning_effort": stage.reasoning_effort,
+            "enabled": stage.enabled,
         }
         _write_json(run_dir / "run.json", meta)
         _append_log(
@@ -625,6 +658,7 @@ class Runner:
         run_dir: Path,
         params: Mapping[str, Any],
         meta: dict[str, Any],
+        concurrency_override: int | None,
     ) -> None:
         stage_dir = run_dir / "stages" / stage.stage_id
         stage_dir.mkdir(parents=True, exist_ok=True)
@@ -681,12 +715,27 @@ class Runner:
                     f"Map stage '{stage.stage_id}' expects JSON list from '{map_from}'."
                 )
 
+        execution_mode = "serial"
+        max_in_flight = 1
+        if stage.provider == "openai":
+            if concurrency_override is not None:
+                if concurrency_override < 1:
+                    raise RunnerError("Concurrency override must be >= 1.")
+                max_in_flight = concurrency_override
+            elif stage.concurrency_enabled:
+                max_in_flight = stage.concurrency_max_in_flight or 4
+            if max_in_flight > 1:
+                execution_mode = "concurrent"
+
         stage_meta = {
             "stage_id": stage.stage_id,
             "provider": stage.provider,
             "model": stage.model,
             "temperature": stage.temperature,
             "reasoning_effort": stage.reasoning_effort,
+            "enabled": stage.enabled,
+            "execution_mode": execution_mode,
+            "max_in_flight": max_in_flight,
             "output": stage.output,
             "mode": stage.mode,
             "map_from": map_from,
@@ -721,7 +770,17 @@ class Runner:
             "model": stage.model,
             "temperature": stage.temperature,
             "reasoning_effort": stage.reasoning_effort,
+            "enabled": stage.enabled,
+            "execution_mode": execution_mode,
+            "max_in_flight": max_in_flight,
         }
+        meta.setdefault("concurrency", {"used": False, "stages": {}})
+        meta["concurrency"]["stages"][stage.stage_id] = {
+            "mode": execution_mode,
+            "max_in_flight": max_in_flight,
+        }
+        if execution_mode == "concurrent":
+            meta["concurrency"]["used"] = True
         _write_json(run_dir / "run.json", meta)
         _append_log(
             run_dir,
@@ -731,12 +790,18 @@ class Runner:
                 f"temperature={stage.temperature} reasoning_effort={stage.reasoning_effort}"
             ),
         )
+        _append_log(
+            run_dir,
+            f"Stage {stage.stage_id} running in {execution_mode.upper()} mode (max_in_flight={max_in_flight})",
+        )
 
         items_root = stage_dir / "items"
         items_root.mkdir(parents=True, exist_ok=True)
 
-        manifest_items: list[dict[str, Any]] = []
+        manifest_items: list[dict[str, Any] | None] = [None] * len(items)
         had_failures = False
+
+        work_items: list[dict[str, Any]] = []
 
         for index, item in enumerate(items):
             if not isinstance(item, dict):
@@ -765,14 +830,12 @@ class Runner:
                     _write_json(item_path, item)
                 if not item_stage_path.exists():
                     _write_json(item_stage_path, item_meta)
-                manifest_items.append(
-                    {
-                        "id": item_id,
-                        "_selected": False,
-                        "status": "skipped",
-                        "item": item,
-                    }
-                )
+                manifest_items[index] = {
+                    "id": item_id,
+                    "_selected": False,
+                    "status": "skipped",
+                    "item": item,
+                }
                 continue
 
             item_output_path = _item_output_path(stage, item_dir)
@@ -787,7 +850,7 @@ class Runner:
                 raw_path = _item_logs_dir(run_dir, stage.stage_id, item_id) / "raw.txt"
                 if raw_path.exists():
                     manifest_entry["raw_path"] = _relative_path(raw_path, run_dir)
-                manifest_items.append(manifest_entry)
+                manifest_items[index] = manifest_entry
                 continue
 
             item_context = dict(context)
@@ -809,12 +872,36 @@ class Runner:
                 item_id=item_id,
             )
             rendered_prompt = _render_prompt(stage.prompt, item_context)
+
+            work_items.append(
+                {
+                    "index": index,
+                    "item": item,
+                    "item_id": item_id,
+                    "item_dir": item_dir,
+                    "item_stage_path": item_stage_path,
+                    "rendered_prompt": rendered_prompt,
+                    "used_context": used_context,
+                }
+            )
+
+        def process_item(work: dict[str, Any]) -> tuple[int, dict[str, Any], bool]:
+            index = work["index"]
+            item = work["item"]
+            item_id = work["item_id"]
+            item_dir = work["item_dir"]
+            item_stage_path = work["item_stage_path"]
+            rendered_prompt = work["rendered_prompt"]
+            used_context = work["used_context"]
+
             item_meta = {
                 "stage_id": stage.stage_id,
                 "provider": stage.provider,
                 "model": stage.model,
                 "temperature": stage.temperature,
                 "reasoning_effort": stage.reasoning_effort,
+                "execution_mode": execution_mode,
+                "max_in_flight": max_in_flight,
                 "output": stage.output,
                 "item_id": item_id,
                 "item_index": index,
@@ -854,6 +941,13 @@ class Runner:
                     "prompt": rendered_prompt,
                 },
             )
+            _append_log(
+                run_dir,
+                (
+                    f"stage:{stage.stage_id} item:{item_id} status=started "
+                    f"mode={execution_mode}"
+                ),
+            )
 
             try:
                 try:
@@ -871,6 +965,7 @@ class Runner:
                             "use a reasoning-capable model."
                         ) from exc
                     raise
+
                 item_logs_dir = _item_logs_dir(run_dir, stage.stage_id, item_id)
                 raw_path = item_logs_dir / "raw.txt"
                 raw_path.write_text(response_text)
@@ -898,7 +993,12 @@ class Runner:
                 item_meta["completed_at"] = _utc_now()
                 item_meta["status"] = "completed"
                 _write_json(item_stage_path, item_meta)
-                manifest_items.append(
+                _append_log(
+                    run_dir,
+                    f"stage:{stage.stage_id} item:{item_id} status=completed",
+                )
+                return (
+                    index,
                     {
                         "id": item_id,
                         "_selected": True,
@@ -906,10 +1006,10 @@ class Runner:
                         "item": item,
                         "output_path": _relative_path(output_path, run_dir),
                         "raw_path": _relative_path(raw_path, run_dir),
-                    }
+                    },
+                    False,
                 )
             except Exception as exc:
-                had_failures = True
                 error = {
                     "stage_id": stage.stage_id,
                     "item_id": item_id,
@@ -921,7 +1021,12 @@ class Runner:
                 item_meta["status"] = "failed"
                 item_meta["failed_at"] = _utc_now()
                 _write_json(item_stage_path, item_meta)
-                manifest_items.append(
+                _append_log(
+                    run_dir,
+                    f"stage:{stage.stage_id} item:{item_id} status=failed error={exc}",
+                )
+                return (
+                    index,
                     {
                         "id": item_id,
                         "_selected": True,
@@ -929,26 +1034,47 @@ class Runner:
                         "item": item,
                         "error": str(exc),
                         "error_path": _relative_path(error_path, run_dir),
-                    }
+                    },
+                    True,
                 )
-                _append_log(
-                    run_dir,
-                    f"stage:{stage.stage_id} item:{item_id} status=failed error={exc}",
-                )
+
+        if execution_mode == "concurrent" and work_items:
+            with ThreadPoolExecutor(max_workers=max_in_flight) as executor:
+                futures = [executor.submit(process_item, work) for work in work_items]
+                for future in as_completed(futures):
+                    index, entry, failed = future.result()
+                    manifest_items[index] = entry
+                    if failed:
+                        had_failures = True
+        else:
+            for work in work_items:
+                index, entry, failed = process_item(work)
+                manifest_items[index] = entry
+                if failed:
+                    had_failures = True
+
+        manifest_items_final: list[dict[str, Any]] = [
+            entry for entry in manifest_items if entry is not None
+        ]
 
         stage_meta["completed_at"] = _utc_now()
         stage_meta["status"] = "completed_with_errors" if had_failures else "completed"
         stage_meta["items_total"] = len(items)
-        stage_meta["items_failed"] = sum(1 for entry in manifest_items if entry["status"] == "failed")
-        stage_meta["items_skipped"] = sum(1 for entry in manifest_items if entry["status"] == "skipped")
+        stage_meta["items_failed"] = sum(
+            1 for entry in manifest_items_final if entry["status"] == "failed"
+        )
+        stage_meta["items_skipped"] = sum(
+            1 for entry in manifest_items_final if entry["status"] == "skipped"
+        )
         stage_meta["items_completed"] = sum(
-            1 for entry in manifest_items if entry["status"] == "completed"
+            1 for entry in manifest_items_final if entry["status"] == "completed"
         )
         _write_json(stage_dir / "stage.json", stage_meta)
+        _write_stage_meta(run_dir, stage.stage_id, stage_meta)
         _write_json(
             stage_dir / "output.json",
             {
-                "items": manifest_items,
+                "items": manifest_items_final,
                 "map_from": map_from,
                 "map_from_file": map_from_file,
             },
@@ -964,6 +1090,9 @@ class Runner:
             "model": stage.model,
             "temperature": stage.temperature,
             "reasoning_effort": stage.reasoning_effort,
+            "enabled": stage.enabled,
+            "execution_mode": execution_mode,
+            "max_in_flight": max_in_flight,
         }
         _write_json(run_dir / "run.json", meta)
         _append_log(
@@ -1037,6 +1166,7 @@ class Runner:
         start_stage: str | None = None,
         stop_after: str | None = None,
         stage_only: str | None = None,
+        concurrency_override: int | None = None,
     ) -> Path:
         stage_ids = [stage.stage_id for stage in pipeline.stages]
         if len(stage_ids) != len(set(stage_ids)):
@@ -1094,6 +1224,8 @@ class Runner:
             _append_log(run_dir, f"run status=resumed pipeline={pipeline.name}")
 
         for stage in pipeline.stages[:start_idx]:
+            if not stage.enabled:
+                continue
             stage_dir = run_dir / "stages" / stage.stage_id
             if not _stage_completed(stage, stage_dir):
                 raise RunnerError(
@@ -1101,10 +1233,110 @@ class Runner:
                     f"upstream stage '{stage.stage_id}' is incomplete."
                 )
 
+        disabled_stage_ids = {stage.stage_id for stage in pipeline.stages if not stage.enabled}
+
         try:
             for idx, stage in enumerate(pipeline.stages):
                 if idx < start_idx or idx > stop_idx:
                     continue
+
+                if not stage.enabled:
+                    stage_dir = run_dir / "stages" / stage.stage_id
+                    stage_dir.mkdir(parents=True, exist_ok=True)
+                    skipped_at = _utc_now()
+                    stage_meta = {
+                        "stage_id": stage.stage_id,
+                        "provider": stage.provider,
+                        "model": stage.model,
+                        "temperature": stage.temperature,
+                        "reasoning_effort": stage.reasoning_effort,
+                        "enabled": stage.enabled,
+                        "output": stage.output,
+                        "mode": stage.mode,
+                        "map_from": stage.map_from,
+                        "map_from_file": stage.map_from_file,
+                        "publish": stage.publish,
+                        "status": "skipped",
+                        "skip_reason": "disabled_in_yaml",
+                        "skipped_at": skipped_at,
+                    }
+                    _write_json(stage_dir / "stage.json", stage_meta)
+                    _write_stage_meta(run_dir, stage.stage_id, stage_meta)
+                    meta["stages"][stage.stage_id] = {
+                        "status": "skipped",
+                        "skip_reason": "disabled_in_yaml",
+                        "skipped_at": skipped_at,
+                        "provider": stage.provider,
+                        "model": stage.model,
+                        "temperature": stage.temperature,
+                        "reasoning_effort": stage.reasoning_effort,
+                        "enabled": stage.enabled,
+                    }
+                    _write_json(run_dir / "run.json", meta)
+                    _append_log(
+                        run_dir,
+                        f"Stage {stage.stage_id} SKIPPED (disabled in pipeline yaml)",
+                    )
+                    if idx == stop_idx:
+                        if stop_idx == len(pipeline.stages) - 1:
+                            meta["completed_at"] = _utc_now()
+                            meta["status"] = "completed"
+                        else:
+                            meta["stopped_at"] = _utc_now()
+                            meta["status"] = "stopped"
+                        _write_json(run_dir / "run.json", meta)
+                        _append_log(run_dir, f"run status={meta['status']}")
+                        self._publish_outputs(pipeline, run_dir, meta)
+                        return run_dir
+                    continue
+
+                disabled_dep = None
+                for dep in _stage_dependencies(stage):
+                    if dep in disabled_stage_ids:
+                        disabled_dep = dep
+                        break
+                if disabled_dep:
+                    message = (
+                        f"Cannot run stage '{stage.stage_id}': dependency '{disabled_dep}' "
+                        "is disabled in pipeline yaml (enabled=false)."
+                    )
+                    stage_meta = {
+                        "stage_id": stage.stage_id,
+                        "provider": stage.provider,
+                        "model": stage.model,
+                        "temperature": stage.temperature,
+                        "reasoning_effort": stage.reasoning_effort,
+                        "enabled": stage.enabled,
+                        "output": stage.output,
+                        "mode": stage.mode,
+                        "map_from": stage.map_from,
+                        "map_from_file": stage.map_from_file,
+                        "publish": stage.publish,
+                        "status": "failed",
+                        "error": "disabled_dependency",
+                        "dependency": disabled_dep,
+                        "failed_at": _utc_now(),
+                    }
+                    _write_stage_meta(run_dir, stage.stage_id, stage_meta)
+                    meta["stages"][stage.stage_id] = {
+                        "status": "failed",
+                        "error": "disabled_dependency",
+                        "dependency": disabled_dep,
+                        "provider": stage.provider,
+                        "model": stage.model,
+                        "temperature": stage.temperature,
+                        "reasoning_effort": stage.reasoning_effort,
+                        "enabled": stage.enabled,
+                    }
+                    _write_json(run_dir / "run.json", meta)
+                    _append_log(
+                        run_dir,
+                        (
+                            f"stage:{stage.stage_id} status=failed "
+                            f"error=disabled_dependency dependency={disabled_dep}"
+                        ),
+                    )
+                    raise RunnerError(message)
 
                 if stage.mode == "map":
                     self._run_map_stage(
@@ -1114,6 +1346,7 @@ class Runner:
                         run_dir=run_dir,
                         params=params,
                         meta=meta,
+                        concurrency_override=concurrency_override,
                     )
                 else:
                     self._run_single_stage(
