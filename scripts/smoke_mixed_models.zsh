@@ -49,7 +49,7 @@ if [[ ! -f "$RUN_DIR/run.json" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$RUN_DIR/stages/$STAGE_ONE/raw.txt" ]]; then
+if [[ ! -f "$RUN_DIR/logs/stages/$STAGE_ONE/raw.txt" ]]; then
   echo "Smoke check failed: $STAGE_ONE raw.txt missing" >&2
   exit 1
 fi
@@ -59,7 +59,7 @@ if [[ ! -f "$RUN_DIR/stages/$STAGE_ONE/output.md" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$RUN_DIR/stages/$STAGE_TWO/raw.txt" ]]; then
+if [[ ! -f "$RUN_DIR/logs/stages/$STAGE_TWO/raw.txt" ]]; then
   echo "Smoke check failed: $STAGE_TWO raw.txt missing" >&2
   exit 1
 fi

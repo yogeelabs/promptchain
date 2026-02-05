@@ -48,6 +48,42 @@ def _append_log(run_dir: Path, message: str) -> None:
         handle.write(f"[{timestamp}] {message}\n")
 
 
+def _logs_dir(run_dir: Path) -> Path:
+    path = run_dir / "logs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _support_dir(run_dir: Path) -> Path:
+    path = run_dir / "support"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _stage_logs_dir(run_dir: Path, stage_id: str) -> Path:
+    path = _logs_dir(run_dir) / "stages" / stage_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _stage_support_dir(run_dir: Path, stage_id: str) -> Path:
+    path = _support_dir(run_dir) / "stages" / stage_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _item_logs_dir(run_dir: Path, stage_id: str, item_id: str) -> Path:
+    path = _stage_logs_dir(run_dir, stage_id) / "items" / item_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _item_support_dir(run_dir: Path, stage_id: str, item_id: str) -> Path:
+    path = _stage_support_dir(run_dir, stage_id) / "items" / item_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _read_json(path: Path, label: str) -> Any:
     try:
         return json.loads(path.read_text())
@@ -186,17 +222,14 @@ def _parse_json_response(response_text: str) -> Any:
     raise json.JSONDecodeError("No valid JSON found in response.", response_text, 0)
 
 
-def _stage_output_paths(stage: Stage, stage_dir: Path) -> tuple[Path, Path]:
+def _stage_output_paths(stage: Stage, stage_dir: Path) -> Path:
     if stage.mode == "map":
-        output_path = stage_dir / "output.json"
-    else:
-        output_path = stage_dir / ("output.json" if stage.output == "json" else "output.md")
-    raw_path = stage_dir / "raw.txt"
-    return output_path, raw_path
+        return stage_dir / "output.json"
+    return stage_dir / ("output.json" if stage.output == "json" else "output.md")
 
 
 def _load_stage_output(stage: Stage, stage_dir: Path) -> tuple[str, Any | None]:
-    output_path, _ = _stage_output_paths(stage, stage_dir)
+    output_path = _stage_output_paths(stage, stage_dir)
     if not output_path.exists():
         raise RunnerError(f"Missing output for stage '{stage.stage_id}' at {output_path}")
     if stage.mode == "map" or stage.output == "json":
@@ -207,8 +240,7 @@ def _load_stage_output(stage: Stage, stage_dir: Path) -> tuple[str, Any | None]:
 
 
 def _stage_output_path(stage: Stage, stage_dir: Path) -> Path:
-    output_path, _ = _stage_output_paths(stage, stage_dir)
-    return output_path
+    return _stage_output_paths(stage, stage_dir)
 
 
 def _stage_output_exists(stage: Stage, stage_dir: Path) -> bool:
@@ -443,6 +475,8 @@ class Runner:
             "stage_id": stage.stage_id,
             "provider": stage.provider,
             "model": stage.model,
+            "temperature": stage.temperature,
+            "reasoning_effort": stage.reasoning_effort,
             "output": stage.output,
             "mode": stage.mode,
             "publish": stage.publish,
@@ -451,8 +485,9 @@ class Runner:
             "status": "started",
         }
         _write_json(stage_dir / "stage.json", stage_meta)
+        support_dir = _stage_support_dir(run_dir, stage.stage_id)
         _write_json(
-            stage_dir / "context.json",
+            support_dir / "context.json",
             {
                 "rendered_prompt": rendered_prompt,
                 "context_all": {
@@ -466,27 +501,62 @@ class Runner:
                 "context_used": used_context,
             },
         )
+        _write_json(
+            support_dir / "request.json",
+            {
+                "provider": stage.provider,
+                "model": stage.model,
+                "temperature": stage.temperature,
+                "reasoning_effort": stage.reasoning_effort,
+                "prompt": rendered_prompt,
+            },
+        )
         meta["stages"][stage.stage_id] = {
             "status": "started",
             "started_at": stage_meta["started_at"],
             "provider": stage.provider,
             "model": stage.model,
+            "temperature": stage.temperature,
+            "reasoning_effort": stage.reasoning_effort,
         }
         _write_json(run_dir / "run.json", meta)
         _append_log(
             run_dir,
             (
                 f"stage:{stage.stage_id} status=started mode={stage.mode} "
-                f"provider={stage.provider} model={stage.model}"
+                f"provider={stage.provider} model={stage.model} "
+                f"temperature={stage.temperature} reasoning_effort={stage.reasoning_effort}"
             ),
         )
 
-        response_text = provider.generate(
-            model=stage.model,
-            prompt=rendered_prompt,
-            reasoning=stage.reasoning,
+        try:
+            response_text = provider.generate(
+                model=stage.model,
+                prompt=rendered_prompt,
+                temperature=stage.temperature,
+                reasoning_effort=stage.reasoning_effort,
+            )
+        except RuntimeError as exc:
+            if stage.reasoning_effort and "reasoning.effort" in str(exc):
+                raise RunnerError(
+                    f"Stage '{stage.stage_id}' rejected reasoning_effort "
+                    f"'{stage.reasoning_effort}'. Remove reasoning_effort or "
+                    "use a reasoning-capable model."
+                ) from exc
+            raise
+
+        logs_dir = _stage_logs_dir(run_dir, stage.stage_id)
+        raw_path = logs_dir / "raw.txt"
+        raw_path.write_text(response_text)
+        _write_json(
+            support_dir / "response.json",
+            {
+                "provider": stage.provider,
+                "model": stage.model,
+                "response_chars": len(response_text),
+                "raw_path": _relative_path(raw_path, run_dir),
+            },
         )
-        (stage_dir / "raw.txt").write_text(response_text)
 
         if stage.output == "json":
             try:
@@ -499,7 +569,8 @@ class Runner:
                     "error": "Invalid JSON output format.",
                     "detail": str(exc),
                 }
-                _write_json(stage_dir / "error.json", error)
+                error_path = logs_dir / "error.json"
+                _write_json(error_path, error)
                 stage_meta["status"] = "failed"
                 stage_meta["failed_at"] = _utc_now()
                 _write_json(stage_dir / "stage.json", stage_meta)
@@ -507,6 +578,9 @@ class Runner:
                     "status": "failed",
                     "failed_at": stage_meta["failed_at"],
                     "error": error_message,
+                    "error_path": _relative_path(error_path, run_dir),
+                    "temperature": stage.temperature,
+                    "reasoning_effort": stage.reasoning_effort,
                 }
                 meta["status"] = "failed"
                 meta["error"] = f"Stage '{stage.stage_id}' output was not valid JSON list."
@@ -529,13 +603,16 @@ class Runner:
             "completed_at": stage_meta["completed_at"],
             "provider": stage.provider,
             "model": stage.model,
+            "temperature": stage.temperature,
+            "reasoning_effort": stage.reasoning_effort,
         }
         _write_json(run_dir / "run.json", meta)
         _append_log(
             run_dir,
             (
                 f"stage:{stage.stage_id} status=completed "
-                f"provider={stage.provider} model={stage.model}"
+                f"provider={stage.provider} model={stage.model} "
+                f"temperature={stage.temperature} reasoning_effort={stage.reasoning_effort}"
             ),
         )
 
@@ -608,6 +685,8 @@ class Runner:
             "stage_id": stage.stage_id,
             "provider": stage.provider,
             "model": stage.model,
+            "temperature": stage.temperature,
+            "reasoning_effort": stage.reasoning_effort,
             "output": stage.output,
             "mode": stage.mode,
             "map_from": map_from,
@@ -617,8 +696,9 @@ class Runner:
             "status": "started",
         }
         _write_json(stage_dir / "stage.json", stage_meta)
+        support_dir = _stage_support_dir(run_dir, stage.stage_id)
         _write_json(
-            stage_dir / "context.json",
+            support_dir / "context.json",
             {
                 "map_from": map_from,
                 "map_from_file": map_from_file,
@@ -639,13 +719,16 @@ class Runner:
             "started_at": stage_meta["started_at"],
             "provider": stage.provider,
             "model": stage.model,
+            "temperature": stage.temperature,
+            "reasoning_effort": stage.reasoning_effort,
         }
         _write_json(run_dir / "run.json", meta)
         _append_log(
             run_dir,
             (
                 f"stage:{stage.stage_id} status=started mode={stage.mode} map_from={map_from} "
-                f"provider={stage.provider} model={stage.model}"
+                f"provider={stage.provider} model={stage.model} "
+                f"temperature={stage.temperature} reasoning_effort={stage.reasoning_effort}"
             ),
         )
 
@@ -701,7 +784,7 @@ class Runner:
                     "item": item,
                     "output_path": _relative_path(item_output_path, run_dir),
                 }
-                raw_path = item_dir / "raw.txt"
+                raw_path = _item_logs_dir(run_dir, stage.stage_id, item_id) / "raw.txt"
                 if raw_path.exists():
                     manifest_entry["raw_path"] = _relative_path(raw_path, run_dir)
                 manifest_items.append(manifest_entry)
@@ -730,6 +813,8 @@ class Runner:
                 "stage_id": stage.stage_id,
                 "provider": stage.provider,
                 "model": stage.model,
+                "temperature": stage.temperature,
+                "reasoning_effort": stage.reasoning_effort,
                 "output": stage.output,
                 "item_id": item_id,
                 "item_index": index,
@@ -739,8 +824,9 @@ class Runner:
             }
             _write_json(item_dir / "item.json", item)
             _write_json(item_stage_path, item_meta)
+            item_support_dir = _item_support_dir(run_dir, stage.stage_id, item_id)
             _write_json(
-                item_dir / "context.json",
+                item_support_dir / "context.json",
                 {
                     "rendered_prompt": rendered_prompt,
                     "context_all": {
@@ -758,14 +844,45 @@ class Runner:
                     "context_used": used_context,
                 },
             )
+            _write_json(
+                item_support_dir / "request.json",
+                {
+                    "provider": stage.provider,
+                    "model": stage.model,
+                    "temperature": stage.temperature,
+                    "reasoning_effort": stage.reasoning_effort,
+                    "prompt": rendered_prompt,
+                },
+            )
 
             try:
-                response_text = provider.generate(
-                    model=stage.model,
-                    prompt=rendered_prompt,
-                    reasoning=stage.reasoning,
+                try:
+                    response_text = provider.generate(
+                        model=stage.model,
+                        prompt=rendered_prompt,
+                        temperature=stage.temperature,
+                        reasoning_effort=stage.reasoning_effort,
+                    )
+                except RuntimeError as exc:
+                    if stage.reasoning_effort and "reasoning.effort" in str(exc):
+                        raise RunnerError(
+                            f"Stage '{stage.stage_id}' rejected reasoning_effort "
+                            f"'{stage.reasoning_effort}'. Remove reasoning_effort or "
+                            "use a reasoning-capable model."
+                        ) from exc
+                    raise
+                item_logs_dir = _item_logs_dir(run_dir, stage.stage_id, item_id)
+                raw_path = item_logs_dir / "raw.txt"
+                raw_path.write_text(response_text)
+                _write_json(
+                    item_support_dir / "response.json",
+                    {
+                        "provider": stage.provider,
+                        "model": stage.model,
+                        "response_chars": len(response_text),
+                        "raw_path": _relative_path(raw_path, run_dir),
+                    },
                 )
-                (item_dir / "raw.txt").write_text(response_text)
 
                 if stage.output == "json":
                     try:
@@ -788,7 +905,7 @@ class Runner:
                         "status": "completed",
                         "item": item,
                         "output_path": _relative_path(output_path, run_dir),
-                        "raw_path": _relative_path(item_dir / "raw.txt", run_dir),
+                        "raw_path": _relative_path(raw_path, run_dir),
                     }
                 )
             except Exception as exc:
@@ -799,7 +916,8 @@ class Runner:
                     "item_index": index,
                     "error": str(exc),
                 }
-                _write_json(item_dir / "error.json", error)
+                error_path = _item_logs_dir(run_dir, stage.stage_id, item_id) / "error.json"
+                _write_json(error_path, error)
                 item_meta["status"] = "failed"
                 item_meta["failed_at"] = _utc_now()
                 _write_json(item_stage_path, item_meta)
@@ -810,7 +928,7 @@ class Runner:
                         "status": "failed",
                         "item": item,
                         "error": str(exc),
-                        "error_path": _relative_path(item_dir / "error.json", run_dir),
+                        "error_path": _relative_path(error_path, run_dir),
                     }
                 )
                 _append_log(
@@ -844,6 +962,8 @@ class Runner:
             "items_skipped": stage_meta["items_skipped"],
             "provider": stage.provider,
             "model": stage.model,
+            "temperature": stage.temperature,
+            "reasoning_effort": stage.reasoning_effort,
         }
         _write_json(run_dir / "run.json", meta)
         _append_log(
@@ -951,6 +1071,8 @@ class Runner:
                 "pipeline": pipeline.name,
                 "pipeline_provider": pipeline.provider,
                 "pipeline_model": pipeline.model,
+                "pipeline_temperature": pipeline.temperature,
+                "pipeline_reasoning_effort": pipeline.reasoning_effort,
                 "pipeline_path": str(getattr(pipeline, "path", "")),
                 "params": dict(params),
                 "started_at": _utc_now(),

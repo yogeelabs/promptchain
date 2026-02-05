@@ -49,7 +49,7 @@ if [[ ! -f "$RUN_DIR/run.json" ]]; then
 fi
 
 for STAGE_ID in "${STAGE_IDS[@]}"; do
-  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/raw.txt" ]]; then
+  if [[ ! -f "$RUN_DIR/logs/stages/$STAGE_ID/raw.txt" ]]; then
     echo "Smoke check failed: raw.txt missing for stage $STAGE_ID" >&2
     exit 1
   fi
@@ -57,7 +57,7 @@ for STAGE_ID in "${STAGE_IDS[@]}"; do
     echo "Smoke check failed: output.md missing for stage $STAGE_ID" >&2
     exit 1
   fi
-  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/context.json" ]]; then
+  if [[ ! -f "$RUN_DIR/support/stages/$STAGE_ID/context.json" ]]; then
     echo "Smoke check failed: context.json missing for stage $STAGE_ID" >&2
     exit 1
   fi

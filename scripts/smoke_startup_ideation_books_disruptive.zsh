@@ -7,6 +7,11 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+  echo "Smoke check skipped: OPENAI_API_KEY is not set" >&2
+  exit 0
+fi
+
 PIPELINE="pipelines/startup_ideation_books_disruptive.yaml"
 STAGE_IDS=("book_list" "book_lines")
 
@@ -48,7 +53,7 @@ if [[ ! -f "$RUN_DIR/run.json" ]]; then
 fi
 
 for STAGE_ID in "${STAGE_IDS[@]}"; do
-  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/raw.txt" ]]; then
+  if [[ ! -f "$RUN_DIR/logs/stages/$STAGE_ID/raw.txt" ]]; then
     echo "Smoke check failed: raw.txt missing for stage $STAGE_ID" >&2
     exit 1
   fi
@@ -63,7 +68,7 @@ for STAGE_ID in "${STAGE_IDS[@]}"; do
       exit 1
     fi
   fi
-  if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/context.json" ]]; then
+  if [[ ! -f "$RUN_DIR/support/stages/$STAGE_ID/context.json" ]]; then
     echo "Smoke check failed: context.json missing for stage $STAGE_ID" >&2
     exit 1
   fi

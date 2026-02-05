@@ -48,7 +48,7 @@ if [[ ! -f "$RUN_DIR/run.json" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$RUN_DIR/stages/$STAGE_ID/raw.txt" ]]; then
+if [[ ! -f "$RUN_DIR/logs/stages/$STAGE_ID/raw.txt" ]]; then
   echo "Smoke check failed: raw.txt missing" >&2
   exit 1
 fi

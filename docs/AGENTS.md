@@ -23,13 +23,16 @@ If something is unclear, **refer to the docs first**, not the code.
 
 Before coding, agents must consult these documents **in order**:
 
-1. `URD.md` — user needs and expectations
+1. `docs/URD.md` — user needs and expectations
 2. `docs/PRD.md` — product scope and guarantees
 3. `docs/architecture.md` — system responsibilities
 4. `docs/plan.md` — phases and milestones
 5. `docs/Checklist.md` — acceptance criteria (when present)
 
 Code must never contradict these documents.
+
+Agents must never create duplicate or multiple copies of the same canonical docs.
+If a doc exists in multiple locations, consolidate it and keep the single canonical copy.
 
 ---
 

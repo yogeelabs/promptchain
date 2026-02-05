@@ -147,6 +147,7 @@ This ensures:
 The product must allow:
 - selecting different AI models for different steps
 - mixing models within the same workflow
+- per-step reasoning configuration (where supported by the chosen model/provider)
 
 This enables:
 - lightweight models for enumeration
@@ -183,8 +184,25 @@ The product should allow users to opt in to external providers (OpenAI and OpenA
 This must ensure:
 - external providers are explicitly chosen by the user
 - provider and model are recorded for traceability
+- reasoning configuration per stage is recorded when supported
 - workflows behave the same (single, sequential, fan‑out)
 - prompt‑writing requirements remain unchanged
+- deliverables remain separate from intermediate/support artifacts
+
+### 5.9 Batch Execution Mode (Optional)
+
+The product must support:
+- a cost-optimized execution mode for large fan-out workloads
+- the ability to execute compatible stages using provider batch processing
+- user selection between interactive and batch execution
+
+Key product guarantees:
+- interactive mode remains the default
+- batch mode must produce equivalent artifacts as interactive runs
+- batch mode is provider-dependent (initially OpenAI)
+- batch execution remains transparent
+  - run metadata records execution mode
+  - logs indicate provider and processing method
 
 ---
 
@@ -234,6 +252,8 @@ The MVP must **not** include:
 - document ingestion
 - review automation
 - external providers as a requirement for completion (Phase 9 is post‑MVP)
+  - OpenAI provider is optional and not required for MVP
+- batch execution (Phase 10 is post‑MVP)
 
 ---
 

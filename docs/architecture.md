@@ -141,6 +141,10 @@ The key architectural rule:
 - **intermediate artifacts live outside `output/`**
 - **final deliverables are copied/collected into `output/`**
 
+Supporting and debug artifacts are stored in run-internal folders:
+- `runs/<run_id>/logs/` for raw outputs and error traces
+- `runs/<run_id>/support/` for request/response summaries and context dumps
+
 ---
 
 ## 7. Stage Output Types
@@ -191,7 +195,14 @@ The provider layer:
 
 The runner must log which model was used per stage for traceability.
 
-### 9.1 External Provider Lane (Optional)
+### 9.1 Reasoning Configuration
+
+When supported by the chosen provider/model:
+- the runner resolves per-stage reasoning configuration
+- the provider receives it
+- stage metadata records it for traceability
+
+### 9.2 External Provider Lane (Optional)
 
 PromptChain can be extended to use external providers (OpenAI or OpenAI‑compatible) without changing the default local‑first behavior.
 External provider usage must be explicitly chosen and clearly logged per stage.
@@ -239,7 +250,49 @@ This supports the PRD requirement: “failure does not require starting over.”
 
 ---
 
-## 13. Minimal Extensibility Points (MVP-Safe)
+## 13. Execution Modes: Interactive vs Batch
+
+The system supports two execution modes:
+
+### Interactive Mode
+- Default execution path.
+- Stages execute immediately.
+- Outputs are written synchronously.
+
+### Batch Mode
+- Optional execution path for compatible workloads.
+- Primarily applies to fan-out (map) stages processing large lists.
+- The runner submits work to a provider capable of batch processing.
+- Results are collected asynchronously and written to artifacts later.
+
+### Responsibilities
+
+**Runner**
+- determines execution mode
+- evaluates stage compatibility for batch
+- submits and tracks batch jobs
+- collects outputs
+- writes artifacts in the standard structure
+
+**Provider**
+- accepts batch submissions
+- processes asynchronously
+- returns outputs for ingestion
+
+### Product Contract
+- Artifact structure must remain identical between modes.
+- Only execution timing and cost behavior differ.
+- Batch support must remain transparent via logs and metadata.
+
+### Directory Policy
+- Batch submission payloads, job ids, and status snapshots are stored under:
+  - `runs/<run_id>/logs/` or `runs/<run_id>/support/`
+- Final deliverables remain only under:
+  - `runs/<run_id>/output/`
+
+---
+
+## 14. Minimal Extensibility Points (MVP-Safe)
 
 PromptChain should be designed to grow without redesign:
 
@@ -251,7 +304,7 @@ However, MVP should not implement features beyond the PRD MVP scope.
 
 ---
 
-## 14. What This Architecture Explicitly Avoids
+## 15. What This Architecture Explicitly Avoids
 
 To keep the system aligned with the PRD and prevent complexity creep, the architecture avoids:
 
@@ -263,7 +316,7 @@ To keep the system aligned with the PRD and prevent complexity creep, the archit
 
 ---
 
-## 15. Summary
+## 16. Summary
 
 This architecture implements PromptChain as a small, local-first execution engine where:
 

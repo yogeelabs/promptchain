@@ -265,6 +265,7 @@ The guiding rule:
 - Support OpenAI provider
 - Support OpenAI-compatible provider (LM Studio / vLLM / other compatible servers)
 - Provider choice per stage remains consistent with Phase 6 (per-stage model selection)
+- Per-stage reasoning effort configuration (when supported)
 - Traceability and clear failure messages for external calls
 
 ### Sub‑Goals / Tasks
@@ -272,6 +273,8 @@ The guiding rule:
 - [ ] Add explicit “opt-in external provider” guidance to README (optional addendum)
 - [ ] Ensure plan includes “no cloud required” as an invariant
 - [ ] Add conceptual acceptance tests (smoke scripts) for external providers
+- [ ] Ensure stage metadata/logs record provider, model, and reasoning effort
+- [ ] Ensure support/debug files are stored outside `output/`
 
 ### Exit Criteria
 - Docs clearly state external providers are optional
@@ -279,8 +282,52 @@ The guiding rule:
   - can run a pipeline using an external provider
   - can mix providers across stages
   - logs show provider/model used
+  - logs show reasoning effort when configured
   - failures are explainable and recoverable
+  - supporting/debug artifacts never land in `output/`
 - No changes to MVP scope or earlier phase definitions
+
+---
+
+## Phase 10 — Batch Execution Mode (OpenAI Batch Jobs)
+
+### Goal
+Enable cost-optimized execution for large fan-out workloads using provider batch processing while preserving the same artifact structure and user experience as interactive runs.
+
+---
+
+### Capabilities Delivered
+
+- Run mode selection: interactive vs batch
+- Batch submission for compatible stages
+- Asynchronous result collection
+- Item-level status tracking
+- Retry of failed or missing items
+- Equivalent artifact layout to interactive runs
+- Transparent logging and metadata
+- Strict separation of deliverables vs support files
+
+---
+
+### Sub-Goals / Tasks
+
+- [ ] Define batch-compatible stage types (high-level)
+- [ ] Document run mode selection behavior
+- [ ] Document submission → status → collection lifecycle
+- [ ] Define retry workflows for partial failures
+- [ ] Document provider dependency (OpenAI initially)
+- [ ] Document artifact parity guarantees
+- [ ] Update sample pipeline guidance for large lists
+
+---
+
+### Exit Criteria
+
+- Users understand when to use batch mode
+- Batch and interactive runs produce equivalent artifacts
+- Execution mode is visible in metadata/logs
+- Partial failures are recoverable
+- Deliverables remain isolated in `output/`
 
 ---
 
@@ -298,6 +345,7 @@ The guiding rule:
 | 7 | Output separation |
 | 8 | Hardening |
 | 9 | Optional external providers |
+| 10 | Batch execution mode |
 
 ---
 

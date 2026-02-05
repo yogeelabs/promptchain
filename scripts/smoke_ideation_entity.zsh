@@ -76,7 +76,7 @@ fi
 
 for stage in $STAGES; do
   STAGE_DIR="$RUN_DIR/stages/$stage"
-  RAW_FILE="$STAGE_DIR/raw.txt"
+  RAW_FILE="$RUN_DIR/logs/stages/$stage/raw.txt"
   OUT_FILE="$STAGE_DIR/output.md"
 
   if [[ ! -d "$STAGE_DIR" ]]; then

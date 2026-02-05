@@ -13,7 +13,8 @@ class Stage:
     prompt: str
     provider: str
     model: str
-    reasoning: str | None
+    reasoning_effort: str | None
+    temperature: float | None
     output: str  # "markdown" or "json"
     mode: str  # "single" or "map"
     map_from: str | None
@@ -34,7 +35,8 @@ class Pipeline:
     name: str
     provider: str
     model: str
-    reasoning: str | None
+    reasoning_effort: str | None
+    temperature: float | None
     stages: list[Stage]
     path: str
 
@@ -64,7 +66,7 @@ def _require_provider(value: Any, field: str) -> str:
     return provider
 
 
-def _require_reasoning(value: Any, field: str) -> str | None:
+def _require_reasoning_effort(value: Any, field: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
@@ -76,6 +78,14 @@ def _require_reasoning(value: Any, field: str) -> str | None:
             f"Field '{field}' must be one of {sorted(allowed)}, got '{value}'."
         )
     return reasoning
+
+
+def _require_temperature(value: Any, field: str) -> float | None:
+    if value is None:
+        return None
+    if not isinstance(value, (int, float)):
+        raise PipelineError(f"Field '{field}' must be a number.")
+    return float(value)
 
 
 def _require_mapping(value: Any, field: str) -> dict[str, Any]:
@@ -114,7 +124,11 @@ def load_pipeline(path: str | Path) -> Pipeline:
     name = _require_str(data.get("name", path.stem), "name")
     provider = _require_provider(data.get("provider", "ollama"), "provider")
     model = _require_str(data.get("model", ""), "model")
-    reasoning = _require_reasoning(data.get("reasoning"), "reasoning")
+    reasoning_effort = _require_reasoning_effort(
+        data.get("reasoning_effort", data.get("reasoning")),
+        "reasoning_effort",
+    )
+    temperature = _require_temperature(data.get("temperature"), "temperature")
 
     stages_raw = data.get("stages")
     if not isinstance(stages_raw, list) or not stages_raw:
@@ -130,9 +144,16 @@ def load_pipeline(path: str | Path) -> Pipeline:
         stage_provider = _require_provider(stage_provider, f"stages[{stage_id}].provider")
         stage_model = stage_raw.get("model", model)
         stage_model = _require_str(stage_model, f"stages[{stage_id}].model")
-        stage_reasoning = _require_reasoning(
-            stage_raw.get("reasoning", reasoning),
-            f"stages[{stage_id}].reasoning",
+        stage_reasoning_effort = _require_reasoning_effort(
+            stage_raw.get(
+                "reasoning_effort",
+                stage_raw.get("reasoning", reasoning_effort),
+            ),
+            f"stages[{stage_id}].reasoning_effort",
+        )
+        stage_temperature = _require_temperature(
+            stage_raw.get("temperature", temperature),
+            f"stages[{stage_id}].temperature",
         )
         output = stage_raw.get("output", "markdown")
         output = _require_str(output, f"stages[{stage_id}].output").lower()
@@ -194,7 +215,8 @@ def load_pipeline(path: str | Path) -> Pipeline:
                 prompt=prompt,
                 provider=stage_provider,
                 model=stage_model,
-                reasoning=stage_reasoning,
+                reasoning_effort=stage_reasoning_effort,
+                temperature=stage_temperature,
                 output=output,
                 mode=mode,
                 map_from=map_from,
@@ -208,7 +230,8 @@ def load_pipeline(path: str | Path) -> Pipeline:
         name=name,
         provider=provider,
         model=model,
-        reasoning=reasoning,
+        reasoning_effort=reasoning_effort,
+        temperature=temperature,
         stages=stages,
         path=str(path),
     )

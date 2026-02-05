@@ -1,7 +1,7 @@
 name: startup_ideation_books_disruptive
 provider: openai
 model: gpt-5.2-2025-12-11
-reasoning: medium
+reasoning_effort: medium
 stages:
   - id: book_list
     prompt: |
@@ -11,7 +11,7 @@ stages:
       List the best books for startup ideation , disruptive innovation, Opportunity Discovery,Disruption mechanics,Future-Thinking & Scenario Imagination,For breaking assumptions and imagining radical products,Systems & Startup Design
 
       Requirements:
-      - Provide 1 to 3 books.
+      - Provide 100 to 150 books.
       - JSON list only. No extra text.
       - Each item must be an object with keys: bookname, author.
       - Use lowercase keys exactly as written (bookname, author).

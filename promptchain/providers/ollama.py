@@ -58,15 +58,26 @@ class OllamaProvider:
                 f"Model '{model}' not found in Ollama. Available models: {available}"
             )
 
-    def generate(self, model: str, prompt: str, reasoning: str | None = None) -> str:
-        payload = self._request(
-            "/api/generate",
-            {
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-            },
-        )
+    def generate(
+        self,
+        *,
+        model: str,
+        prompt: str,
+        temperature: float | None = None,
+        reasoning_effort: str | None = None,
+        timeout: int = 300,
+        extra: dict | None = None,
+    ) -> str:
+        payload_body: dict[str, object] = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+        }
+        if temperature is not None:
+            payload_body["temperature"] = temperature
+        if extra:
+            payload_body.update(extra)
+        payload = self._request("/api/generate", payload_body)
 
         if "response" not in payload:
             raise RuntimeError("Ollama response missing 'response' field.")
