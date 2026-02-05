@@ -21,6 +21,7 @@ def test_support_files_not_in_output(tmp_path):
         enabled=True,
         concurrency_enabled=False,
         concurrency_max_in_flight=None,
+        batch_enabled=False,
         output="markdown",
         mode="single",
         map_from=None,

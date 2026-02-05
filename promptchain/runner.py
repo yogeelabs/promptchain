@@ -659,7 +659,7 @@ class Runner:
         params: Mapping[str, Any],
         meta: dict[str, Any],
         concurrency_override: int | None,
-    ) -> None:
+    ) -> bool:
         stage_dir = run_dir / "stages" / stage.stage_id
         stage_dir.mkdir(parents=True, exist_ok=True)
 
@@ -698,6 +698,15 @@ class Runner:
         provider = self._get_provider(stage.provider)
         provider.ensure_model(stage.model)
 
+        if stage.batch_enabled and stage.provider != "openai":
+            raise RunnerError(
+                f"Batch mode for stage '{stage.stage_id}' is only supported with OpenAI."
+            )
+        if stage.batch_enabled and (concurrency_override is not None or stage.concurrency_enabled):
+            raise RunnerError(
+                f"Stage '{stage.stage_id}' cannot enable both batch and concurrency."
+            )
+
         if map_from_file:
             items, map_source_meta = _load_map_items_from_file(
                 path=map_from_file,
@@ -716,15 +725,18 @@ class Runner:
                 )
 
         execution_mode = "serial"
-        max_in_flight = 1
-        if stage.provider == "openai":
+        max_in_flight: int | None = 1
+        if stage.batch_enabled:
+            execution_mode = "batch"
+            max_in_flight = None
+        elif stage.provider == "openai":
             if concurrency_override is not None:
                 if concurrency_override < 1:
                     raise RunnerError("Concurrency override must be >= 1.")
                 max_in_flight = concurrency_override
             elif stage.concurrency_enabled:
                 max_in_flight = stage.concurrency_max_in_flight or 4
-            if max_in_flight > 1:
+            if max_in_flight and max_in_flight > 1:
                 execution_mode = "concurrent"
 
         stage_meta = {
@@ -774,13 +786,20 @@ class Runner:
             "execution_mode": execution_mode,
             "max_in_flight": max_in_flight,
         }
-        meta.setdefault("concurrency", {"used": False, "stages": {}})
-        meta["concurrency"]["stages"][stage.stage_id] = {
-            "mode": execution_mode,
-            "max_in_flight": max_in_flight,
-        }
         if execution_mode == "concurrent":
+            meta.setdefault("concurrency", {"used": False, "stages": {}})
+            meta["concurrency"]["stages"][stage.stage_id] = {
+                "mode": execution_mode,
+                "max_in_flight": max_in_flight,
+            }
             meta["concurrency"]["used"] = True
+        if execution_mode == "batch":
+            meta.setdefault("batch", {"used": False, "stages": {}})
+            meta["batch"]["stages"][stage.stage_id] = {
+                "mode": execution_mode,
+                "status": "submitted",
+            }
+            meta["batch"]["used"] = True
         _write_json(run_dir / "run.json", meta)
         _append_log(
             run_dir,
@@ -790,10 +809,21 @@ class Runner:
                 f"temperature={stage.temperature} reasoning_effort={stage.reasoning_effort}"
             ),
         )
-        _append_log(
-            run_dir,
-            f"Stage {stage.stage_id} running in {execution_mode.upper()} mode (max_in_flight={max_in_flight})",
-        )
+        if execution_mode == "concurrent":
+            _append_log(
+                run_dir,
+                f"Stage {stage.stage_id} running in CONCURRENT mode (max_in_flight={max_in_flight})",
+            )
+        elif execution_mode == "batch":
+            _append_log(
+                run_dir,
+                f"Stage {stage.stage_id} running in BATCH mode (submit/collect)",
+            )
+        else:
+            _append_log(
+                run_dir,
+                f"Stage {stage.stage_id} running in SERIAL mode",
+            )
 
         items_root = stage_dir / "items"
         items_root.mkdir(parents=True, exist_ok=True)
@@ -884,6 +914,478 @@ class Runner:
                     "used_context": used_context,
                 }
             )
+
+        if execution_mode == "batch":
+            batch_support_dir = _stage_support_dir(run_dir, stage.stage_id)
+            batch_state_path = batch_support_dir / "batch.json"
+
+            if batch_state_path.exists():
+                batch_state = _read_json(batch_state_path, "Batch state")
+                batch_id = batch_state.get("batch_id")
+                if not isinstance(batch_id, str):
+                    raise RunnerError(f"Batch state missing batch_id for stage '{stage.stage_id}'.")
+                batch_info = provider.retrieve_batch(batch_id)
+                batch_status = batch_info.get("status")
+                output_file_id = batch_info.get("output_file_id")
+                error_file_id = batch_info.get("error_file_id")
+                batch_state["status"] = batch_status
+                batch_state["output_file_id"] = output_file_id
+                batch_state["error_file_id"] = error_file_id
+                _write_json(batch_state_path, batch_state)
+
+                if batch_status in {"failed", "expired", "canceled"}:
+                    stage_meta["status"] = "failed"
+                    stage_meta["batch_id"] = batch_id
+                    stage_meta["batch_status"] = batch_status
+                    stage_meta["failed_at"] = _utc_now()
+                    _write_json(stage_dir / "stage.json", stage_meta)
+                    _write_stage_meta(run_dir, stage.stage_id, stage_meta)
+                    meta["stages"][stage.stage_id] = {
+                        "status": "failed",
+                        "batch_status": batch_status,
+                        "batch_id": batch_id,
+                        "provider": stage.provider,
+                        "model": stage.model,
+                        "temperature": stage.temperature,
+                        "reasoning_effort": stage.reasoning_effort,
+                        "enabled": stage.enabled,
+                        "execution_mode": execution_mode,
+                    }
+                    meta.setdefault("batch", {"used": False, "stages": {}})
+                    meta["batch"]["stages"][stage.stage_id] = {
+                        "mode": execution_mode,
+                        "status": batch_status,
+                    }
+                    _write_json(run_dir / "run.json", meta)
+                    _append_log(
+                        run_dir,
+                        f"stage:{stage.stage_id} status=failed batch_id={batch_id} batch_status={batch_status}",
+                    )
+                    raise RunnerError(
+                        f"Batch for stage '{stage.stage_id}' failed with status '{batch_status}'."
+                    )
+
+                if batch_status != "completed" or not output_file_id:
+                    stage_meta["status"] = "batch_pending"
+                    stage_meta["batch_id"] = batch_id
+                    stage_meta["batch_status"] = batch_status
+                    stage_meta["updated_at"] = _utc_now()
+                    _write_json(stage_dir / "stage.json", stage_meta)
+                    _write_stage_meta(run_dir, stage.stage_id, stage_meta)
+                    meta["stages"][stage.stage_id] = {
+                        "status": "batch_pending",
+                        "batch_status": batch_status,
+                        "batch_id": batch_id,
+                        "provider": stage.provider,
+                        "model": stage.model,
+                        "temperature": stage.temperature,
+                        "reasoning_effort": stage.reasoning_effort,
+                        "enabled": stage.enabled,
+                        "execution_mode": execution_mode,
+                    }
+                    meta.setdefault("batch", {"used": False, "stages": {}})
+                    meta["batch"]["stages"][stage.stage_id] = {
+                        "mode": execution_mode,
+                        "status": "pending",
+                    }
+                    _write_json(run_dir / "run.json", meta)
+                    _append_log(
+                        run_dir,
+                        f"stage:{stage.stage_id} status=batch_pending batch_id={batch_id} batch_status={batch_status}",
+                    )
+                    return True
+
+                output_lines = provider.download_file(output_file_id).splitlines()
+                error_lines: list[str] = []
+                if error_file_id:
+                    error_lines = provider.download_file(error_file_id).splitlines()
+
+                request_map = {
+                    entry["custom_id"]: entry
+                    for entry in batch_state.get("requests", [])
+                    if isinstance(entry, dict) and isinstance(entry.get("custom_id"), str)
+                }
+
+                def handle_line(line: str, is_error: bool = False) -> None:
+                    nonlocal had_failures
+                    if not line.strip():
+                        return
+                    payload = json.loads(line)
+                    custom_id = payload.get("custom_id")
+                    request_entry = request_map.get(custom_id)
+                    if not request_entry:
+                        return
+                    index = request_entry["item_index"]
+                    item = request_entry["item"]
+                    item_id = request_entry["item_id"]
+                    item_dir = items_root / item_id
+                    item_stage_path = item_dir / "stage.json"
+
+                    if is_error or payload.get("error"):
+                        error = payload.get("error") or payload
+                        error_path = _item_logs_dir(run_dir, stage.stage_id, item_id) / "error.json"
+                        _write_json(error_path, {"error": error, "custom_id": custom_id})
+                        item_meta = _read_json(item_stage_path, "Item stage meta")
+                        item_meta["status"] = "failed"
+                        item_meta["failed_at"] = _utc_now()
+                        _write_json(item_stage_path, item_meta)
+                        manifest_items[index] = {
+                            "id": item_id,
+                            "_selected": True,
+                            "status": "failed",
+                            "item": item,
+                            "error": str(error),
+                            "error_path": _relative_path(error_path, run_dir),
+                        }
+                        had_failures = True
+                        _append_log(
+                            run_dir,
+                            f"stage:{stage.stage_id} item:{item_id} status=failed error=batch_error",
+                        )
+                        return
+
+                    response = payload.get("response", {})
+                    status_code = response.get("status_code")
+                    body = response.get("body")
+                    if status_code != 200 or not isinstance(body, dict):
+                        error_path = _item_logs_dir(run_dir, stage.stage_id, item_id) / "error.json"
+                        _write_json(
+                            error_path,
+                            {
+                                "error": "batch_response_error",
+                                "status_code": status_code,
+                                "custom_id": custom_id,
+                            },
+                        )
+                        item_meta = _read_json(item_stage_path, "Item stage meta")
+                        item_meta["status"] = "failed"
+                        item_meta["failed_at"] = _utc_now()
+                        _write_json(item_stage_path, item_meta)
+                        manifest_items[index] = {
+                            "id": item_id,
+                            "_selected": True,
+                            "status": "failed",
+                            "item": item,
+                            "error": f"batch_response_error status_code={status_code}",
+                            "error_path": _relative_path(error_path, run_dir),
+                        }
+                        had_failures = True
+                        return
+
+                    response_text = provider.extract_text(body)
+                    item_logs_dir = _item_logs_dir(run_dir, stage.stage_id, item_id)
+                    raw_path = item_logs_dir / "raw.txt"
+                    raw_path.write_text(response_text)
+
+                    if stage.output == "json":
+                        try:
+                            parsed = _parse_json_response(response_text)
+                        except json.JSONDecodeError as exc:
+                            error_path = item_logs_dir / "error.json"
+                            _write_json(error_path, {"error": str(exc)})
+                            item_meta = _read_json(item_stage_path, "Item stage meta")
+                            item_meta["status"] = "failed"
+                            item_meta["failed_at"] = _utc_now()
+                            _write_json(item_stage_path, item_meta)
+                            manifest_items[index] = {
+                                "id": item_id,
+                                "_selected": True,
+                                "status": "failed",
+                                "item": item,
+                                "error": str(exc),
+                                "error_path": _relative_path(error_path, run_dir),
+                            }
+                            had_failures = True
+                            return
+                        _write_json(item_dir / "output.json", parsed)
+                        output_path = item_dir / "output.json"
+                    else:
+                        (item_dir / "output.md").write_text(response_text)
+                        output_path = item_dir / "output.md"
+
+                    item_meta = _read_json(item_stage_path, "Item stage meta")
+                    item_meta["status"] = "completed"
+                    item_meta["completed_at"] = _utc_now()
+                    _write_json(item_stage_path, item_meta)
+                    manifest_items[index] = {
+                        "id": item_id,
+                        "_selected": True,
+                        "status": "completed",
+                        "item": item,
+                        "output_path": _relative_path(output_path, run_dir),
+                        "raw_path": _relative_path(raw_path, run_dir),
+                    }
+                    _append_log(
+                        run_dir,
+                        f"stage:{stage.stage_id} item:{item_id} status=completed",
+                    )
+
+                for line in output_lines:
+                    handle_line(line, is_error=False)
+                for line in error_lines:
+                    handle_line(line, is_error=True)
+
+                for entry in request_map.values():
+                    index = entry["item_index"]
+                    if manifest_items[index] is not None:
+                        continue
+                    item_id = entry["item_id"]
+                    item = entry["item"]
+                    error_path = _item_logs_dir(run_dir, stage.stage_id, item_id) / "error.json"
+                    _write_json(
+                        error_path,
+                        {"error": "missing_batch_result", "custom_id": entry["custom_id"]},
+                    )
+                    item_stage_path = (items_root / item_id) / "stage.json"
+                    if item_stage_path.exists():
+                        item_meta = _read_json(item_stage_path, "Item stage meta")
+                        item_meta["status"] = "failed"
+                        item_meta["failed_at"] = _utc_now()
+                        _write_json(item_stage_path, item_meta)
+                    manifest_items[index] = {
+                        "id": item_id,
+                        "_selected": True,
+                        "status": "failed",
+                        "item": item,
+                        "error": "missing_batch_result",
+                        "error_path": _relative_path(error_path, run_dir),
+                    }
+                    had_failures = True
+
+            else:
+                if not work_items:
+                    manifest_items_final = [entry for entry in manifest_items if entry is not None]
+                    stage_meta["completed_at"] = _utc_now()
+                    stage_meta["status"] = "completed"
+                    stage_meta["items_total"] = len(items)
+                    stage_meta["items_failed"] = 0
+                    stage_meta["items_skipped"] = sum(
+                        1 for entry in manifest_items_final if entry["status"] == "skipped"
+                    )
+                    stage_meta["items_completed"] = sum(
+                        1 for entry in manifest_items_final if entry["status"] == "completed"
+                    )
+                    _write_json(stage_dir / "stage.json", stage_meta)
+                    _write_stage_meta(run_dir, stage.stage_id, stage_meta)
+                    _write_json(
+                        stage_dir / "output.json",
+                        {
+                            "items": manifest_items_final,
+                            "map_from": map_from,
+                            "map_from_file": map_from_file,
+                        },
+                    )
+                    meta["stages"][stage.stage_id] = {
+                        "status": stage_meta["status"],
+                        "completed_at": stage_meta["completed_at"],
+                        "items_completed": stage_meta["items_completed"],
+                        "items_failed": stage_meta["items_failed"],
+                        "items_skipped": stage_meta["items_skipped"],
+                        "provider": stage.provider,
+                        "model": stage.model,
+                        "temperature": stage.temperature,
+                        "reasoning_effort": stage.reasoning_effort,
+                        "enabled": stage.enabled,
+                        "execution_mode": execution_mode,
+                    }
+                    _write_json(run_dir / "run.json", meta)
+                    _append_log(
+                        run_dir,
+                        (
+                            "stage:"
+                            f"{stage.stage_id} status={stage_meta['status']} "
+                            f"items_completed={stage_meta['items_completed']} "
+                            f"items_failed={stage_meta['items_failed']} "
+                            f"items_skipped={stage_meta['items_skipped']} "
+                            f"provider={stage.provider} model={stage.model}"
+                        ),
+                    )
+                    return False
+
+                input_path = batch_support_dir / "batch_input.jsonl"
+                request_entries: list[dict[str, Any]] = []
+                with input_path.open("w", encoding="utf-8") as handle:
+                    for work in work_items:
+                        item = work["item"]
+                        item_id = work["item_id"]
+                        index = work["index"]
+                        custom_id = f"{item_id}:{index}"
+                        body: dict[str, Any] = {
+                            "model": stage.model,
+                            "input": [{"role": "user", "content": work["rendered_prompt"]}],
+                        }
+                        if stage.temperature is not None:
+                            body["temperature"] = stage.temperature
+                        if stage.reasoning_effort:
+                            body["reasoning"] = {"effort": stage.reasoning_effort}
+                        entry = {
+                            "custom_id": custom_id,
+                            "method": "POST",
+                            "url": "/v1/responses",
+                            "body": body,
+                        }
+                        handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
+                        request_entries.append(
+                            {
+                                "custom_id": custom_id,
+                                "item_id": item_id,
+                                "item_index": index,
+                                "item": item,
+                            }
+                        )
+
+                        item_meta = {
+                            "stage_id": stage.stage_id,
+                            "provider": stage.provider,
+                            "model": stage.model,
+                            "temperature": stage.temperature,
+                            "reasoning_effort": stage.reasoning_effort,
+                            "execution_mode": execution_mode,
+                            "output": stage.output,
+                            "item_id": item_id,
+                            "item_index": index,
+                            "prompt": work["rendered_prompt"],
+                            "status": "submitted",
+                            "submitted_at": _utc_now(),
+                            "custom_id": custom_id,
+                        }
+                        _write_json(work["item_dir"] / "item.json", item)
+                        _write_json(work["item_stage_path"], item_meta)
+                        item_support_dir = _item_support_dir(run_dir, stage.stage_id, item_id)
+                        _write_json(
+                            item_support_dir / "context.json",
+                            {
+                                "rendered_prompt": work["rendered_prompt"],
+                                "context_all": {
+                                    "params": dict(params),
+                                    "inputs": inputs_text,
+                                    "inputs_json": inputs_json,
+                                    "inputs_meta": inputs_meta,
+                                    "stage_outputs": stage_outputs,
+                                    "stage_json": stage_json,
+                                    "item": item,
+                                    "item_value": item.get("value"),
+                                    "item_index": index,
+                                    "item_id": item_id,
+                                },
+                                "context_used": work["used_context"],
+                            },
+                        )
+                        _write_json(
+                            item_support_dir / "request.json",
+                            {
+                                "provider": stage.provider,
+                                "model": stage.model,
+                                "temperature": stage.temperature,
+                                "reasoning_effort": stage.reasoning_effort,
+                                "prompt": work["rendered_prompt"],
+                            },
+                        )
+                        _append_log(
+                            run_dir,
+                            f"stage:{stage.stage_id} item:{item_id} status=submitted",
+                        )
+
+                upload_payload = provider.upload_batch_file(str(input_path))
+                input_file_id = upload_payload.get("id")
+                if not isinstance(input_file_id, str):
+                    raise RunnerError("OpenAI batch upload did not return a file id.")
+                batch_payload = provider.create_batch(
+                    input_file_id,
+                    metadata={"stage_id": stage.stage_id, "run_id": meta.get("run_id", "")},
+                )
+                batch_id = batch_payload.get("id")
+                if not isinstance(batch_id, str):
+                    raise RunnerError("OpenAI batch creation did not return a batch id.")
+                batch_state = {
+                    "batch_id": batch_id,
+                    "input_file_id": input_file_id,
+                    "status": batch_payload.get("status"),
+                    "submitted_at": _utc_now(),
+                    "requests": request_entries,
+                }
+                _write_json(batch_state_path, batch_state)
+                stage_meta["status"] = "batch_submitted"
+                stage_meta["batch_id"] = batch_id
+                stage_meta["batch_status"] = batch_state.get("status")
+                _write_json(stage_dir / "stage.json", stage_meta)
+                _write_stage_meta(run_dir, stage.stage_id, stage_meta)
+                meta["stages"][stage.stage_id] = {
+                    "status": "batch_submitted",
+                    "batch_id": batch_id,
+                    "batch_status": batch_state.get("status"),
+                    "provider": stage.provider,
+                    "model": stage.model,
+                    "temperature": stage.temperature,
+                    "reasoning_effort": stage.reasoning_effort,
+                    "enabled": stage.enabled,
+                    "execution_mode": execution_mode,
+                }
+                _write_json(run_dir / "run.json", meta)
+                _append_log(
+                    run_dir,
+                    f"stage:{stage.stage_id} status=batch_submitted batch_id={batch_id}",
+                )
+                _append_log(
+                    run_dir,
+                    f"To resume batch: re-run with --run-dir {run_dir}",
+                )
+                return True
+
+            manifest_items_final = [entry for entry in manifest_items if entry is not None]
+            stage_meta["completed_at"] = _utc_now()
+            stage_meta["status"] = "completed_with_errors" if had_failures else "completed"
+            stage_meta["items_total"] = len(items)
+            stage_meta["items_failed"] = sum(
+                1 for entry in manifest_items_final if entry["status"] == "failed"
+            )
+            stage_meta["items_skipped"] = sum(
+                1 for entry in manifest_items_final if entry["status"] == "skipped"
+            )
+            stage_meta["items_completed"] = sum(
+                1 for entry in manifest_items_final if entry["status"] == "completed"
+            )
+            _write_json(stage_dir / "stage.json", stage_meta)
+            _write_stage_meta(run_dir, stage.stage_id, stage_meta)
+            _write_json(
+                stage_dir / "output.json",
+                {
+                    "items": manifest_items_final,
+                    "map_from": map_from,
+                    "map_from_file": map_from_file,
+                },
+            )
+            meta["stages"][stage.stage_id] = {
+                "status": stage_meta["status"],
+                "completed_at": stage_meta["completed_at"],
+                "items_completed": stage_meta["items_completed"],
+                "items_failed": stage_meta["items_failed"],
+                "items_skipped": stage_meta["items_skipped"],
+                "provider": stage.provider,
+                "model": stage.model,
+                "temperature": stage.temperature,
+                "reasoning_effort": stage.reasoning_effort,
+                "enabled": stage.enabled,
+                "execution_mode": execution_mode,
+            }
+            meta.setdefault("batch", {"used": False, "stages": {}})
+            meta["batch"]["stages"][stage.stage_id] = {
+                "mode": execution_mode,
+                "status": stage_meta["status"],
+            }
+            _write_json(run_dir / "run.json", meta)
+            _append_log(
+                run_dir,
+                (
+                    "stage:"
+                    f"{stage.stage_id} status={stage_meta['status']} "
+                    f"items_completed={stage_meta['items_completed']} "
+                    f"items_failed={stage_meta['items_failed']} "
+                    f"items_skipped={stage_meta['items_skipped']} "
+                    f"provider={stage.provider} model={stage.model}"
+                ),
+            )
+            return False
 
         def process_item(work: dict[str, Any]) -> tuple[int, dict[str, Any], bool]:
             index = work["index"]
@@ -1106,6 +1608,7 @@ class Runner:
                 f"provider={stage.provider} model={stage.model}"
             ),
         )
+        return False
 
     def _publish_outputs(self, pipeline: Pipeline, run_dir: Path, meta: dict[str, Any]) -> None:
         output_dir = run_dir / "output"
@@ -1339,7 +1842,7 @@ class Runner:
                     raise RunnerError(message)
 
                 if stage.mode == "map":
-                    self._run_map_stage(
+                    pending = self._run_map_stage(
                         pipeline=pipeline,
                         stage=stage,
                         stage_index=idx,
@@ -1348,6 +1851,12 @@ class Runner:
                         meta=meta,
                         concurrency_override=concurrency_override,
                     )
+                    if pending:
+                        meta["status"] = "batch_pending"
+                        meta["batch_pending_at"] = _utc_now()
+                        _write_json(run_dir / "run.json", meta)
+                        _append_log(run_dir, "run status=batch_pending")
+                        return run_dir
                 else:
                     self._run_single_stage(
                         pipeline=pipeline,

@@ -15,6 +15,8 @@ if [[ -n "${OPENAI_API_KEY:-}" ]]; then
   "$SCRIPT_DIR/smoke_openai_two_step.zsh"
   echo "Running OpenAI concurrent map smoke..."
   "$SCRIPT_DIR/smoke_openai_concurrent_map.zsh"
+  echo "Running OpenAI batch map smoke..."
+  "$SCRIPT_DIR/smoke_openai_batch_map.zsh"
 else
   echo "Skipping OpenAI smoke: OPENAI_API_KEY is not set" >&2
 fi

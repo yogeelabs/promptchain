@@ -18,6 +18,7 @@ class Stage:
     enabled: bool
     concurrency_enabled: bool
     concurrency_max_in_flight: int | None
+    batch_enabled: bool
     output: str  # "markdown" or "json"
     mode: str  # "single" or "map"
     map_from: str | None
@@ -180,6 +181,7 @@ def load_pipeline(path: str | Path) -> Pipeline:
             )
         concurrency_enabled = False
         concurrency_max_in_flight: int | None = None
+        batch_enabled = False
         concurrency_raw = stage_raw.get("concurrency")
         if concurrency_raw is not None:
             if mode != "map":
@@ -203,6 +205,18 @@ def load_pipeline(path: str | Path) -> Pipeline:
                         f"Field 'stages[{stage_id}].concurrency.max_in_flight' must be >= 1."
                     )
                 concurrency_max_in_flight = max_in_flight
+        batch_raw = stage_raw.get("batch")
+        if batch_raw is not None:
+            if mode != "map":
+                raise PipelineError(f"Stage '{stage_id}' batch is only valid for map stages.")
+            batch_cfg = _require_mapping(batch_raw, f"stages[{stage_id}].batch")
+            batch_enabled = _require_bool(
+                batch_cfg.get("enabled", False), f"stages[{stage_id}].batch.enabled"
+            )
+        if batch_enabled and concurrency_enabled:
+            raise PipelineError(
+                f"Stage '{stage_id}' cannot enable both batch and concurrency."
+            )
         map_from = stage_raw.get("map_from")
         map_from_file = stage_raw.get("map_from_file")
         if mode == "map":
@@ -256,6 +270,7 @@ def load_pipeline(path: str | Path) -> Pipeline:
                 enabled=enabled,
                 concurrency_enabled=concurrency_enabled,
                 concurrency_max_in_flight=concurrency_max_in_flight,
+                batch_enabled=batch_enabled,
                 output=output,
                 mode=mode,
                 map_from=map_from,

@@ -130,6 +130,11 @@ Optional concurrency for cloud providers (Phase 11) can speed up large map stage
     output: markdown
 ```
 
+Batch runs (Phase 10) are submit/collect. To resume and collect results later:
+```zsh
+python -m promptchain.cli run --pipeline pipelines/openai_batch_map.yaml --run-dir runs/<run_id>
+```
+
 ### Human-in-the-loop editing & resume (Phase 5)
 
 Pause after a stage, edit outputs, then resume downstream without recomputation:

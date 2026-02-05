@@ -311,6 +311,16 @@ Enable cost-optimized execution for large fan-out workloads using provider batch
 
 ---
 
+### Batch Mode Lifecycle (Resume + No Re-Execution)
+
+- Submit: compatible work units are submitted; run metadata records batch mode and submission status.
+- Track: users can re-run to check status; per-item status is recorded (pending/completed/failed).
+- Collect: completed items are written to standard artifacts; failed items keep error artifacts.
+- Resume: completed item artifacts are never recomputed; only missing or failed items are retried.
+- Retry: users can re-run to retry failed/missing items without restarting the whole run.
+
+---
+
 ### Sub-Goals / Tasks
 
 - [ ] Define batch-compatible stage types (high-level)

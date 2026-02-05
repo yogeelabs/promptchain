@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from promptchain.llm_openai import generate as openai_generate
+from promptchain import llm_openai
 
 
 class OpenAIProvider:
@@ -22,7 +22,7 @@ class OpenAIProvider:
         extra: dict | None = None,
     ) -> str:
         messages = [{"role": "user", "content": prompt}]
-        return openai_generate(
+        return llm_openai.generate(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -30,3 +30,20 @@ class OpenAIProvider:
             timeout=timeout,
             extra=extra,
         )
+
+    def upload_batch_file(self, path: str) -> dict:
+        return llm_openai.upload_file(path=path, purpose="batch")
+
+    def create_batch(self, input_file_id: str, *, metadata: dict | None = None) -> dict:
+        return llm_openai.create_batch(
+            input_file_id=input_file_id, endpoint="/v1/responses", metadata=metadata
+        )
+
+    def retrieve_batch(self, batch_id: str) -> dict:
+        return llm_openai.retrieve_batch(batch_id)
+
+    def download_file(self, file_id: str) -> str:
+        return llm_openai.download_file_content(file_id)
+
+    def extract_text(self, payload: dict) -> str:
+        return llm_openai.extract_text_from_response_payload(payload)

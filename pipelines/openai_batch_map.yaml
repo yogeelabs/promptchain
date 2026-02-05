@@ -1,0 +1,14 @@
+name: openai_batch_map
+provider: openai
+model: gpt-4o-mini
+stages:
+  - id: list_items
+    prompt: "Return a JSON list of five short topics about {topic}. JSON only."
+    output: json
+  - id: expand_items
+    mode: map
+    map_from: list_items
+    batch:
+      enabled: true
+    prompt: "Write one sentence about {item[value]}."
+    output: markdown

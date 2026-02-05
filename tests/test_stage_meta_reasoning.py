@@ -23,6 +23,7 @@ def test_stage_meta_records_reasoning_effort(tmp_path):
         enabled=True,
         concurrency_enabled=False,
         concurrency_max_in_flight=None,
+        batch_enabled=False,
         output="markdown",
         mode="single",
         map_from=None,
