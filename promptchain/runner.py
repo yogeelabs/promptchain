@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import string
 from datetime import datetime, timezone
@@ -145,6 +146,44 @@ def _normalize_json_output(payload: Any) -> dict[str, Any]:
         normalized.append(normalized_item)
 
     return {"items": normalized}
+
+
+def _parse_json_response(response_text: str) -> Any:
+    candidates: list[str] = []
+    stripped = response_text.strip()
+    if stripped:
+        candidates.append(stripped)
+
+    fence_match = re.search(
+        r"```(?:json)?\s*(.*?)\s*```", response_text, flags=re.IGNORECASE | re.DOTALL
+    )
+    if fence_match:
+        fence_content = fence_match.group(1).strip()
+        if fence_content:
+            candidates.insert(0, fence_content)
+
+    decoder = json.JSONDecoder()
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    for source in (stripped, response_text):
+        brace = source.find("{")
+        bracket = source.find("[")
+        starts = [idx for idx in (brace, bracket) if idx != -1]
+        if not starts:
+            continue
+        start = min(starts)
+        try:
+            parsed, _ = decoder.raw_decode(source[start:])
+            return parsed
+        except json.JSONDecodeError:
+            continue
+
+    raise json.JSONDecodeError("No valid JSON found in response.", response_text, 0)
 
 
 def _stage_output_paths(stage: Stage, stage_dir: Path) -> tuple[Path, Path]:
@@ -442,12 +481,16 @@ class Runner:
             ),
         )
 
-        response_text = provider.generate(model=stage.model, prompt=rendered_prompt)
+        response_text = provider.generate(
+            model=stage.model,
+            prompt=rendered_prompt,
+            reasoning=stage.reasoning,
+        )
         (stage_dir / "raw.txt").write_text(response_text)
 
         if stage.output == "json":
             try:
-                parsed = json.loads(response_text)
+                parsed = _parse_json_response(response_text)
                 normalized = _normalize_json_output(parsed)
             except (json.JSONDecodeError, RunnerError) as exc:
                 error_message = "Stage output was not valid JSON list."
@@ -718,13 +761,15 @@ class Runner:
 
             try:
                 response_text = provider.generate(
-                    model=stage.model, prompt=rendered_prompt
+                    model=stage.model,
+                    prompt=rendered_prompt,
+                    reasoning=stage.reasoning,
                 )
                 (item_dir / "raw.txt").write_text(response_text)
 
                 if stage.output == "json":
                     try:
-                        parsed = json.loads(response_text)
+                        parsed = _parse_json_response(response_text)
                     except json.JSONDecodeError as exc:
                         raise RunnerError("Item output was not valid JSON.") from exc
                     _write_json(item_dir / "output.json", parsed)

@@ -13,6 +13,7 @@ class Stage:
     prompt: str
     provider: str
     model: str
+    reasoning: str | None
     output: str  # "markdown" or "json"
     mode: str  # "single" or "map"
     map_from: str | None
@@ -33,6 +34,7 @@ class Pipeline:
     name: str
     provider: str
     model: str
+    reasoning: str | None
     stages: list[Stage]
     path: str
 
@@ -60,6 +62,20 @@ def _require_provider(value: Any, field: str) -> str:
             f"Field '{field}' must be 'ollama' or 'openai', got '{provider}'."
         )
     return provider
+
+
+def _require_reasoning(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise PipelineError(f"Field '{field}' must be a non-empty string.")
+    reasoning = value.strip().lower()
+    allowed = {"none", "minimal", "low", "medium", "high", "xhigh"}
+    if reasoning not in allowed:
+        raise PipelineError(
+            f"Field '{field}' must be one of {sorted(allowed)}, got '{value}'."
+        )
+    return reasoning
 
 
 def _require_mapping(value: Any, field: str) -> dict[str, Any]:
@@ -98,6 +114,7 @@ def load_pipeline(path: str | Path) -> Pipeline:
     name = _require_str(data.get("name", path.stem), "name")
     provider = _require_provider(data.get("provider", "ollama"), "provider")
     model = _require_str(data.get("model", ""), "model")
+    reasoning = _require_reasoning(data.get("reasoning"), "reasoning")
 
     stages_raw = data.get("stages")
     if not isinstance(stages_raw, list) or not stages_raw:
@@ -113,6 +130,10 @@ def load_pipeline(path: str | Path) -> Pipeline:
         stage_provider = _require_provider(stage_provider, f"stages[{stage_id}].provider")
         stage_model = stage_raw.get("model", model)
         stage_model = _require_str(stage_model, f"stages[{stage_id}].model")
+        stage_reasoning = _require_reasoning(
+            stage_raw.get("reasoning", reasoning),
+            f"stages[{stage_id}].reasoning",
+        )
         output = stage_raw.get("output", "markdown")
         output = _require_str(output, f"stages[{stage_id}].output").lower()
         if output not in {"markdown", "json"}:
@@ -173,6 +194,7 @@ def load_pipeline(path: str | Path) -> Pipeline:
                 prompt=prompt,
                 provider=stage_provider,
                 model=stage_model,
+                reasoning=stage_reasoning,
                 output=output,
                 mode=mode,
                 map_from=map_from,
@@ -186,6 +208,7 @@ def load_pipeline(path: str | Path) -> Pipeline:
         name=name,
         provider=provider,
         model=model,
+        reasoning=reasoning,
         stages=stages,
         path=str(path),
     )

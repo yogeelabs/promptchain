@@ -1,0 +1,124 @@
+name: startup_ideation_books_disruptive
+provider: openai
+model: gpt-5.2-2025-12-11
+reasoning: medium
+stages:
+  - id: book_list
+    prompt: |
+      You are a startup ideation librarian.
+
+      Task:
+      List the best books for startup ideation , disruptive innovation, Opportunity Discovery,Disruption mechanics,Future-Thinking & Scenario Imagination,For breaking assumptions and imagining radical products,Systems & Startup Design
+
+      Requirements:
+      - Provide 1 to 3 books.
+      - JSON list only. No extra text.
+      - Each item must be an object with keys: bookname, author.
+      - Use lowercase keys exactly as written (bookname, author).
+      - Do not include extra keys.
+      - Avoid duplicates or near-duplicates.
+
+      Output format:
+      JSON list of objects only.
+    output: json
+  - id: book_lines
+    mode: map
+    map_from: book_list
+    prompt: |
+      You are an Innovation Framework Extraction AI.
+
+      Your task is to convert the book:
+
+      {item_value}
+
+      into a structured AI prompt system.
+
+      --------------------------------
+      STEP 1 — FRAMEWORK IDENTIFICATION
+      --------------------------------
+
+      Extract the core frameworks, models,
+      or thinking structures defined in the book.
+
+      Examples:
+
+      • Named frameworks
+      • Mental models
+      • Process stages
+      • Strategic lenses
+      • Innovation patterns
+
+      For each framework:
+
+      • Name
+      • Definition
+      • Purpose
+      • When to apply
+
+      --------------------------------
+      STEP 2 — NATIVE PROMPT AXES
+      --------------------------------
+
+      For EACH framework:
+
+      Derive prompt categories
+      from the framework itself,
+      NOT from generic business categories.
+
+      Examples:
+
+      If framework = “7 Powers”
+      → Axes = each power
+
+      If framework = “Strategy Kernel”
+      → Axes = diagnosis, policy, actions
+
+      If framework = “Adjacent Possible”
+      → Axes = capability expansion paths
+
+      --------------------------------
+      STEP 3 — PROMPT GENERATION
+      --------------------------------
+
+      For each native axis, generate prompts for:
+
+      • Exploration
+      • Application
+      • Stress testing
+      • Innovation discovery
+
+      Prompts must:
+
+      • Use placeholders like <industry>, <idea>
+      • Be reusable
+      • Be automation-ready
+
+      --------------------------------
+      STEP 4 — OPERATIONALIZATION
+      --------------------------------
+
+      Convert the framework into tools:
+
+      • Checklists
+      • Evaluation questions
+      • Diagnostic lenses
+      • Scoring rubrics
+
+      --------------------------------
+      STEP 5 — STARTUP APPLICATION
+      --------------------------------
+
+      Explain how founders/operators
+      can apply these prompts
+      to build or analyze ventures.
+
+      --------------------------------
+      OUTPUT FORMAT:
+
+      1. Framework
+      2. Native axes
+      3. Prompt sets
+      4. Operator tools
+      5. Startup applications
+      
+    output: markdown

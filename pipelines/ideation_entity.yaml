@@ -1,0 +1,129 @@
+name: ideation_entity
+provider: openai
+model: gpt-4o-mini
+stages:
+  - id: core_entity_extraction
+    prompt: |
+      You are a System Decomposer.
+
+      Task:
+      Given the input below, list ALL distinct entities that exist in the system.
+
+      Rules:
+      - Entities must be concrete or conceptual objects, not actions.
+      - No explanations, no grouping yet.
+      - Strictly One entity per line.
+      - Include both visible and invisible entities.
+      - Include entities even if they seem obvious or trivial.
+      - Do not summarize.
+
+      Input:
+      {input}
+    output: markdown
+  - id: atomic_decomposition
+    prompt: |
+      You are an Exhaustive State Decomposer.
+
+      Task:
+      Break the following raw inputs into ATOMIC observations.
+
+      Rules:
+      - Do not summarize.
+      - Do not give advice.
+      - Do not propose solutions.
+      - Each observation must be a single, objective fact.
+      - Extract implicit facts if they are guaranteed by the text.
+
+      For each atomic observation, label:
+      1. Actor (who is doing it)
+      2. Goal (what they are trying to achieve)
+      3. Context (where / when / tool / environment)
+      4. Friction (what resists progress)
+      5. Workaround (what they do instead)
+      6. Cost (time, money, attention, emotional)
+      7. Frequency signal (one-time / repeated / habitual)
+
+      Output:
+      Numbered list.
+      One atomic observation per line.
+
+      Input:
+      {input}
+    output: markdown
+  - id: ontology_level_decomposition
+    prompt: |
+      You are an Ontology Engineer.
+
+      Break the input system into its fundamental entity types.
+
+      For each category:
+      - Give the category name
+      - List all entities that belong to it
+
+      Entity categories to consider:
+      - Physical objects
+      - Agents (humans or AI)
+      - Representations (symbols, data, abstractions)
+      - Tools / interfaces
+      - Metrics / measurements
+      - Constraints / rules
+      - Contextual elements
+
+      Input:
+      {input}
+    output: markdown
+  - id: exhaustive_state_space_entity_enumerator
+    prompt: |
+      You are an Exhaustive Entity Enumerator.
+
+      Task:
+      Enumerate ALL entities that exist in the given system.
+
+      Rules:
+      - Include physical, digital, conceptual, and inferred entities.
+      - Include entities that exist temporarily.
+      - Include entities that are implied by rules, structure, or constraints.
+      - Include entities created by representation (charts, UI, notation).
+      - One atomic entity per line.
+      - Continue until no new entities can be added.
+
+      Input:
+      {input}
+    output: markdown
+  - id: representation_aware_decomposition
+    prompt: |
+      You are a Representation Decomposition Engine.
+
+      Given the input, break it into:
+      1. Real-world entities
+      2. Represented entities
+      3. Abstract constructs
+      4. Metadata entities
+      5. Observer-facing entities
+
+      Rules:
+      - Treat charts, overlays, labels, timelines, and UI as entities.
+      - Treat information itself as an entity if it is represented.
+
+      Input:
+      {input}
+    output: markdown
+  - id: system_blueprint_prompt
+    prompt: |
+      You are a System Blueprint Generator.
+
+      Step 1:
+      List all entities present in the system.
+
+      Step 2:
+      For each entity, specify:
+      - Type (physical / digital / abstract / agent)
+      - What it depends on to exist
+
+      Rules:
+      - No opinions or advice.
+      - Treat the system as a machine.
+
+      Input:
+      {input}
+    output: markdown

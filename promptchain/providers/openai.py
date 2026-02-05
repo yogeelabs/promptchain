@@ -66,13 +66,16 @@ class OpenAIProvider:
         except json.JSONDecodeError as exc:
             raise RuntimeError("OpenAI response was not valid JSON.") from exc
 
-    def generate(self, model: str, prompt: str) -> str:
+    def generate(self, model: str, prompt: str, reasoning: str | None = None) -> str:
+        body: dict[str, object] = {
+            "model": model,
+            "input": prompt,
+        }
+        if reasoning:
+            body["reasoning"] = {"effort": reasoning}
         payload = self._request(
             "/responses",
-            {
-                "model": model,
-                "input": prompt,
-            },
+            body,
         )
 
         output = payload.get("output")

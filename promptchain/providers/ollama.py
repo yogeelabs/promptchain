@@ -58,7 +58,7 @@ class OllamaProvider:
                 f"Model '{model}' not found in Ollama. Available models: {available}"
             )
 
-    def generate(self, model: str, prompt: str) -> str:
+    def generate(self, model: str, prompt: str, reasoning: str | None = None) -> str:
         payload = self._request(
             "/api/generate",
             {
