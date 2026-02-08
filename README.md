@@ -1,19 +1,23 @@
 # PromptChain
 
-Local-first, inspectable prompt chaining for deliberate multi-step workflows.
+Local-first, inspectable prompt chaining for deliberate multi-step workflows. Pipelines are YAML files in `pipelines/`, and every run writes a fully inspectable artifact directory under `runs/`.
+
+## Purpose
+- Compose multi-stage prompt workflows as simple YAML pipelines
+- Keep runs reproducible and auditable with on-disk artifacts
+- Support local models via Ollama with optional OpenAI stages
 
 ## Requirements
 - Python 3
 - Ollama running at `http://localhost:11434`
 - Models specified in pipelines pulled in Ollama (e.g., `qwen3:8b`)
 
-## Optional OpenAI Provider (Phase 9)
-
+## Optional OpenAI Provider
 PromptChain can optionally use the OpenAI API. This is opt-in and does not change the local-first default.
 
 Requirements:
-- `OPENAI_API_KEY` set in the environment
-- Pipeline configured with `provider: openai`
+- `OPENAI_API_KEY` set in the environment (or `.env`)
+- Pipeline or stage configured with `provider: openai`
 
 ## Setup
 
@@ -23,53 +27,71 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Quickstart
+## Quickstart (CLI)
 
-Run a single-stage pipeline:
+Single stage:
 
 ```zsh
 python -m promptchain.cli run --pipeline pipelines/single.yaml --topic chess
 ```
 
-Run a sequential chain:
+Sequential chain:
 
 ```zsh
 python -m promptchain.cli run --pipeline pipelines/three_step.yaml --topic chess
 ```
 
-Run a fan-out map stage:
+Fan-out map stage:
 
 ```zsh
 python -m promptchain.cli run --pipeline pipelines/fanout_personas_jtbd.yaml --topic chess
 ```
 
-Run a map stage from a text list file:
+JSON → downstream stage:
 
 ```zsh
-python -m promptchain.cli run --pipeline pipelines/text_list_fanout.yaml
+python -m promptchain.cli run --pipeline pipelines/json_then_use.yaml
 ```
 
-Run the publish example:
+Per-stage file inputs:
+
+```zsh
+python -m promptchain.cli run --pipeline pipelines/file_inputs.yaml
+```
+
+Publish example:
 
 ```zsh
 python -m promptchain.cli run --pipeline pipelines/publish_example.yaml --topic chess
 ```
 
-## Smoke Scripts
+## Example Scripts
+
+Every pipeline in `pipelines/` has a matching sample script in `scripts/` named `run_<pipeline>.zsh`. These scripts run the pipeline with a small set of inputs and validate that core artifacts were produced.
+
+Run a couple of examples:
 
 ```zsh
-scripts/smoke_placeholder.zsh
-scripts/smoke_three_step.zsh
-scripts/smoke_json_list.zsh
-scripts/smoke_fanout_personas.zsh
-scripts/smoke_three_stage_fanout_classify.zsh
-scripts/smoke_three_stage_fanout_classify_per_item.zsh
-scripts/smoke_indian_spices_benefits.zsh
-scripts/smoke_mixed_models.zsh
-scripts/smoke_openai_two_step.zsh
-scripts/smoke_text_list_fanout.zsh
-scripts/smoke_json_list_fanout.zsh
+scripts/run_single.zsh
+scripts/run_three_step.zsh
+scripts/run_fanout_personas_jtbd.zsh
 ```
+
+OpenAI examples require `OPENAI_API_KEY`:
+
+```zsh
+scripts/run_openai_two_step.zsh
+scripts/run_openai_concurrent_map.zsh
+scripts/run_openai_batch_map.zsh
+```
+
+## Outputs
+
+Each run creates a directory under `runs/<run_id>/` with:
+- `run.json` metadata
+- `logs/` raw model outputs
+- `stages/<stage_id>/` outputs and artifacts
+- `output/` published deliverables (if any)
 
 ## More Documentation
 

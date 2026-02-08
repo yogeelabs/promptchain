@@ -69,7 +69,7 @@ Run these from repo root:
 scripts/format.zsh
 scripts/lint.zsh
 scripts/test.zsh
-scripts/smoke_placeholder.zsh
+scripts/run_single.zsh
 ```
 
 ### 4.1 Python Environment
@@ -123,7 +123,7 @@ If no test framework exists yet:
 
 Example:
 ```zsh
-scripts/smoke_fanout.zsh
+scripts/run_fanout_personas_jtbd.zsh
 ```
 
 Agents must run the smoke script before considering work complete.

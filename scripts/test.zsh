@@ -3,20 +3,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "Running Ollama smoke..."
-"$SCRIPT_DIR/smoke_placeholder.zsh"
-echo "Running disabled stage smoke..."
-"$SCRIPT_DIR/smoke_disabled_stage.zsh"
-echo "Running disabled dependency smoke..."
-"$SCRIPT_DIR/smoke_disabled_dependency.zsh"
+echo "Running local examples..."
+"$SCRIPT_DIR/run_single.zsh"
+echo "Running disabled stage example..."
+"$SCRIPT_DIR/run_disabled_stage_example.zsh"
+echo "Running disabled dependency example..."
+"$SCRIPT_DIR/run_disabled_dependency_example.zsh"
 
 if [[ -n "${OPENAI_API_KEY:-}" ]]; then
-  echo "Running OpenAI smoke..."
-  "$SCRIPT_DIR/smoke_openai_two_step.zsh"
-  echo "Running OpenAI concurrent map smoke..."
-  "$SCRIPT_DIR/smoke_openai_concurrent_map.zsh"
-  echo "Running OpenAI batch map smoke..."
-  "$SCRIPT_DIR/smoke_openai_batch_map.zsh"
+  echo "Running OpenAI examples..."
+  "$SCRIPT_DIR/run_openai_two_step.zsh"
+  echo "Running OpenAI concurrent map example..."
+  "$SCRIPT_DIR/run_openai_concurrent_map.zsh"
+  echo "Running OpenAI batch map example..."
+  "$SCRIPT_DIR/run_openai_batch_map.zsh"
 else
-  echo "Skipping OpenAI smoke: OPENAI_API_KEY is not set" >&2
+  echo "Skipping OpenAI examples: OPENAI_API_KEY is not set" >&2
 fi

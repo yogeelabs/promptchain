@@ -34,10 +34,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Quick smoke check:
+Quick example run:
 
 ```zsh
-scripts/smoke_placeholder.zsh
+scripts/run_single.zsh
 ```
 
 ### Run a single-stage pipeline (Phase 1)
@@ -265,17 +265,30 @@ PromptChain normalizes JSON outputs into:
 ```
 `id` is deterministic based on item content, and `_selected` defaults to `true`.
 
-### Smoke scripts
+### Example scripts
 
 ```zsh
-scripts/smoke_placeholder.zsh
-scripts/smoke_three_step.zsh
-scripts/smoke_json_list.zsh
-scripts/smoke_fanout_personas.zsh
-scripts/smoke_three_stage_fanout_classify.zsh
-scripts/smoke_three_stage_fanout_classify_per_item.zsh
-scripts/smoke_indian_spices_benefits.zsh
-scripts/smoke_mixed_models.zsh
-scripts/smoke_text_list_fanout.zsh
-scripts/smoke_json_list_fanout.zsh
+scripts/run_single.zsh
+scripts/run_three_step.zsh
+scripts/run_json_list.zsh
+scripts/run_json_then_use.zsh
+scripts/run_file_inputs.zsh
+scripts/run_fanout_personas_jtbd.zsh
+scripts/run_three_stage_fanout_classify.zsh
+scripts/run_three_stage_fanout_classify_per_item.zsh
+scripts/run_indian_spices_benefits.zsh
+scripts/run_mixed_models.zsh
+scripts/run_mixed_providers.zsh
+scripts/run_text_list_fanout.zsh
+scripts/run_json_file_fanout.zsh
+scripts/run_publish_example.zsh
+scripts/run_publish_list_map_map.zsh
+scripts/run_startup_ideation_books_disruptive.zsh
+scripts/run_ideation_entity.zsh
+scripts/run_journey_map_ollama.zsh
+scripts/run_openai_two_step.zsh
+scripts/run_openai_concurrent_map.zsh
+scripts/run_openai_batch_map.zsh
+scripts/run_disabled_stage_example.zsh
+scripts/run_disabled_dependency_example.zsh
 ```

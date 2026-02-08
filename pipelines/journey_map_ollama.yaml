@@ -1,0 +1,106 @@
+name: journey_map_ollama
+provider: ollama
+model: qwen3:8b
+temperature: 0.2
+stages:
+  - id: scenarios
+    prompt: |
+      For {persona} using {product} in {industry}, generate 3-5 realistic scenarios.
+      Return a JSON array only. Each item must be an object with:
+      - value: short scenario title (5-8 words)
+      - jtbd: job-to-be-done statement
+      - success_criteria: list of 2-4 measurable criteria
+      Keep language concrete and realistic. JSON only, no extra text.
+    output: json
+  - id: actors
+    mode: map
+    map_from: scenarios
+    prompt: |
+      Scenario: {item[value]}
+      JTBD: {item[jtbd]}
+      Success criteria: {item[success_criteria]}
+      Context: {persona} using {product} in {industry}.
+
+      List the primary actors involved in this scenario.
+      Include non-obvious actors (approvers, influencers, blockers, internal ops).
+      Provide a short role description per actor.
+    output: markdown
+  - id: phase_model
+    mode: map
+    map_from: scenarios
+    prompt: |
+      Scenario: {item[value]}
+      JTBD: {item[jtbd]}
+      Success criteria: {item[success_criteria]}
+      Context: {persona} using {product} in {industry}.
+
+      Propose a phase model with 5-9 observable, time-ordered phases.
+      Return a clear ordered list, each phase with a 1-sentence description.
+    output: markdown
+  - id: phase_actions_touchpoints
+    mode: map
+    map_from: scenarios
+    prompt: |
+      Scenario: {item[value]}
+      JTBD: {item[jtbd]}
+      Success criteria: {item[success_criteria]}
+      Context: {persona} using {product} in {industry}.
+
+      For each phase (5-9 total), enumerate the actor's actions in verb form.
+      For each action, list touchpoints by channel (web, mobile, in-person, email, phone, partner, internal ops).
+      Use a table or structured bullets to keep it compact.
+    output: markdown
+  - id: phase_objects_entities
+    mode: map
+    map_from: scenarios
+    prompt: |
+      Scenario: {item[value]}
+      JTBD: {item[jtbd]}
+      Success criteria: {item[success_criteria]}
+      Context: {persona} using {product} in {industry}.
+
+      For each phase (5-9 total), list the objects/entities the user:
+      - interacts with
+      - sees
+      - experiences
+      - feels
+      Keep it compact and concrete. Use a table or structured bullets.
+    output: markdown
+  - id: phase_questions_emotions
+    mode: map
+    map_from: scenarios
+    prompt: |
+      Scenario: {item[value]}
+      JTBD: {item[jtbd]}
+      Success criteria: {item[success_criteria]}
+      Context: {persona} using {product} in {industry}.
+
+      For each phase (5-9 total), generate the top questions {persona} is trying to answer.
+      Sketch an emotional curve (high/neutral/low) per phase and explain likely drivers.
+    output: markdown
+  - id: phase_pain_needs
+    mode: map
+    map_from: scenarios
+    prompt: |
+      Scenario: {item[value]}
+      JTBD: {item[jtbd]}
+      Success criteria: {item[success_criteria]}
+      Context: {persona} using {product} in {industry}.
+
+      For each phase (5-9 total), identify likely breakdowns (delays, uncertainty, cost, trust, effort, handoffs, errors).
+      Translate each pain point into a "Need to..." statement and a measurable outcome.
+    output: markdown
+  - id: phase_ownership_metrics
+    mode: map
+    map_from: scenarios
+    publish: true
+    prompt: |
+      Scenario: {item[value]}
+      JTBD: {item[jtbd]}
+      Success criteria: {item[success_criteria]}
+      Context: {persona} using {product} in {industry}.
+
+      For each phase (5-9 total):
+      - Map each touchpoint to an owner (team/function/vendor); flag unclear ownership.
+      - Suggest evidence/metrics (time-to-complete, drop-off, NPS drivers, error rate, support contacts).
+    output: markdown

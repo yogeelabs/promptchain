@@ -15,36 +15,36 @@ if command -v python >/dev/null 2>&1; then
 elif command -v python3 >/dev/null 2>&1; then
   PYTHON_BIN="python3"
 else
-  echo "Smoke check failed: python not found" >&2
+  echo "Example run failed: python not found" >&2
   exit 1
 fi
 
 if [[ ! -f "$PIPELINE" ]]; then
-  echo "Smoke check failed: pipeline not found at $PIPELINE" >&2
+  echo "Example run failed: pipeline not found at $PIPELINE" >&2
   exit 1
 fi
 
 OUTPUT=$($PYTHON_BIN -m promptchain.cli run --pipeline "$PIPELINE" --topic chess 2>&1) && {
-  echo "Smoke check failed: expected run to fail due to disabled dependency" >&2
+  echo "Example run failed: expected run to fail due to disabled dependency" >&2
   echo "$OUTPUT" >&2
   exit 1
 }
 
 if ! echo "$OUTPUT" | rg -q "$EXPECTED_ERROR"; then
-  echo "Smoke check failed: missing expected dependency-disabled error" >&2
+  echo "Example run failed: missing expected dependency-disabled error" >&2
   echo "$OUTPUT" >&2
   exit 1
 fi
 
 RUN_DIR=$(ls -td runs/* 2>/dev/null | head -n1 || true)
 if [[ -z "$RUN_DIR" ]]; then
-  echo "Smoke check failed: run directory not found" >&2
+  echo "Example run failed: run directory not found" >&2
   exit 1
 fi
 
 if ! rg -q "error=disabled_dependency" "$RUN_DIR/run.log"; then
-  echo "Smoke check failed: disabled dependency log line missing" >&2
+  echo "Example run failed: disabled dependency log line missing" >&2
   exit 1
 fi
 
-echo "Smoke check passed: $RUN_DIR"
+echo "Example run passed: $RUN_DIR"

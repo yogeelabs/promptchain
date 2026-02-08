@@ -17,42 +17,42 @@ if command -v python >/dev/null 2>&1; then
 elif command -v python3 >/dev/null 2>&1; then
   PYTHON_BIN="python3"
 else
-  echo "Smoke check failed: python not found" >&2
+  echo "Example run failed: python not found" >&2
   exit 1
 fi
 
 if [[ ! -f "$PIPELINE" ]]; then
-  echo "Smoke check failed: pipeline not found at $PIPELINE" >&2
+  echo "Example run failed: pipeline not found at $PIPELINE" >&2
   exit 1
 fi
 
 OUTPUT=$($PYTHON_BIN -m promptchain.cli run --pipeline "$PIPELINE" --topic chess 2>&1) || {
-  echo "Smoke check failed: promptchain run failed" >&2
+  echo "Example run failed: promptchain run failed" >&2
   echo "$OUTPUT" >&2
   exit 1
 }
 
 RUN_DIR=$(echo "$OUTPUT" | rg -m1 '^run_dir:' | awk '{print $2}')
 if [[ -z "$RUN_DIR" ]]; then
-  echo "Smoke check failed: run_dir not reported" >&2
+  echo "Example run failed: run_dir not reported" >&2
   echo "$OUTPUT" >&2
   exit 1
 fi
 
 if [[ ! -d "$RUN_DIR" ]]; then
-  echo "Smoke check failed: run directory not created at $RUN_DIR" >&2
+  echo "Example run failed: run directory not created at $RUN_DIR" >&2
   exit 1
 fi
 
 LIST_JSON="$RUN_DIR/stages/$LIST_STAGE/output.json"
 if [[ ! -f "$LIST_JSON" ]]; then
-  echo "Smoke check failed: output.json missing for stage $LIST_STAGE" >&2
+  echo "Example run failed: output.json missing for stage $LIST_STAGE" >&2
   exit 1
 fi
 
 MAP_MANIFEST="$RUN_DIR/stages/$MAP_STAGE/output.json"
 if [[ ! -f "$MAP_MANIFEST" ]]; then
-  echo "Smoke check failed: output.json missing for map stage $MAP_STAGE" >&2
+  echo "Example run failed: output.json missing for map stage $MAP_STAGE" >&2
   exit 1
 fi
 
@@ -66,14 +66,14 @@ map_manifest = run_dir / "stages" / "$MAP_STAGE" / "output.json"
 
 list_payload = json.loads(list_json.read_text())
 if not isinstance(list_payload, dict) or "items" not in list_payload:
-    raise SystemExit("Smoke check failed: list stage output missing items list")
+    raise SystemExit("Example run failed: list stage output missing items list")
 if not list_payload["items"]:
-    raise SystemExit("Smoke check failed: list stage items list is empty")
+    raise SystemExit("Example run failed: list stage items list is empty")
 
 manifest = json.loads(map_manifest.read_text())
 items = manifest.get("items")
 if not isinstance(items, list):
-    raise SystemExit("Smoke check failed: map manifest items missing")
+    raise SystemExit("Example run failed: map manifest items missing")
 
 any_completed = False
 for entry in items:
@@ -81,15 +81,15 @@ for entry in items:
         any_completed = True
         output_path = entry.get("output_path")
         if not output_path:
-            raise SystemExit("Smoke check failed: completed item missing output_path")
+            raise SystemExit("Example run failed: completed item missing output_path")
         if not (run_dir / output_path).exists():
-            raise SystemExit("Smoke check failed: item output file missing")
+            raise SystemExit("Example run failed: item output file missing")
         raw_path = entry.get("raw_path")
         if raw_path and not (run_dir / raw_path).exists():
-            raise SystemExit("Smoke check failed: item raw file missing")
+            raise SystemExit("Example run failed: item raw file missing")
 
 if not any_completed:
-    raise SystemExit("Smoke check failed: no completed map items")
+    raise SystemExit("Example run failed: no completed map items")
 
-print("Smoke check passed:", map_manifest)
+print("Example run passed:", map_manifest)
 PY
