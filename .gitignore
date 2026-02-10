@@ -2,5 +2,9 @@ runs/
 .venv/
 __pycache__/
 .pytest_cache/
+.mypy_cache/
+.obsidian/
+.vscode/
+.idea/
 .env
 .DS_Store
