@@ -16,7 +16,7 @@ Local-first, inspectable prompt chaining for deliberate multi-step workflows. Pi
 PromptChain can optionally use the OpenAI API. This is opt-in and does not change the local-first default.
 
 Requirements:
-- `OPENAI_API_KEY` set in the environment (or `.env`)
+- `OPENAI_API_KEY` set in the environment (or `.env`; see `.env.example`)
 - Pipeline or stage configured with `provider: openai`
 
 ## Setup
@@ -77,7 +77,7 @@ scripts/run_three_step.zsh
 scripts/run_fanout_personas_jtbd.zsh
 ```
 
-OpenAI examples require `OPENAI_API_KEY`:
+OpenAI examples require `OPENAI_API_KEY` (copy `.env.example` to `.env` and set it, or export the variable):
 
 ```zsh
 scripts/run_openai_two_step.zsh

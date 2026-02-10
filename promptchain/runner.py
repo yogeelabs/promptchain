@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import string
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -406,9 +407,15 @@ def _stage_publish_enabled(pipeline: Pipeline) -> list[Stage]:
 
 
 class Runner:
-    def __init__(self, runs_root: Path | str = "runs") -> None:
+    def __init__(self, runs_root: Path | str = "runs", *, progress: bool = False) -> None:
         self.runs_root = Path(runs_root)
         self._providers: dict[str, Any] = {}
+        self._progress_enabled = progress
+
+    def _progress(self, message: str) -> None:
+        if not self._progress_enabled:
+            return
+        print(message, file=sys.stdout, flush=True)
 
     def _get_provider(self, name: str):
         provider = self._providers.get(name)
@@ -557,6 +564,12 @@ class Runner:
                 f"temperature={stage.temperature} reasoning_effort={stage.reasoning_effort}"
             ),
         )
+        self._progress(
+            (
+                f"stage {stage.stage_id} started (mode=single provider={stage.provider} "
+                f"model={stage.model})"
+            )
+        )
 
         try:
             response_text = provider.generate(
@@ -621,6 +634,7 @@ class Runner:
                     run_dir,
                     f"stage:{stage.stage_id} status=failed error=invalid_json_output",
                 )
+                self._progress(f"stage {stage.stage_id} failed (invalid_json_output)")
                 raise RunnerError(error_message) from exc
             _write_json(stage_dir / "output.json", normalized)
         else:
@@ -648,6 +662,7 @@ class Runner:
                 f"temperature={stage.temperature} reasoning_effort={stage.reasoning_effort}"
             ),
         )
+        self._progress(f"stage {stage.stage_id} completed")
 
     def _run_map_stage(
         self,
@@ -809,6 +824,12 @@ class Runner:
                 f"temperature={stage.temperature} reasoning_effort={stage.reasoning_effort}"
             ),
         )
+        self._progress(
+            (
+                f"stage {stage.stage_id} started (mode=map items={len(items)} "
+                f"execution={execution_mode} provider={stage.provider} model={stage.model})"
+            )
+        )
         if execution_mode == "concurrent":
             _append_log(
                 run_dir,
@@ -961,6 +982,12 @@ class Runner:
                         run_dir,
                         f"stage:{stage.stage_id} status=failed batch_id={batch_id} batch_status={batch_status}",
                     )
+                    self._progress(
+                        (
+                            f"stage {stage.stage_id} failed (batch_id={batch_id} "
+                            f"batch_status={batch_status})"
+                        )
+                    )
                     raise RunnerError(
                         f"Batch for stage '{stage.stage_id}' failed with status '{batch_status}'."
                     )
@@ -992,6 +1019,12 @@ class Runner:
                     _append_log(
                         run_dir,
                         f"stage:{stage.stage_id} status=batch_pending batch_id={batch_id} batch_status={batch_status}",
+                    )
+                    self._progress(
+                        (
+                            f"stage {stage.stage_id} batch pending "
+                            f"(batch_id={batch_id} status={batch_status})"
+                        )
                     )
                     return True
 
@@ -1330,6 +1363,12 @@ class Runner:
                     run_dir,
                     f"To resume batch: re-run with --run-dir {run_dir}",
                 )
+                self._progress(
+                    (
+                        f"stage {stage.stage_id} batch submitted "
+                        f"(batch_id={batch_id} items={len(work_items)})"
+                    )
+                )
                 return True
 
             manifest_items_final = [entry for entry in manifest_items if entry is not None]
@@ -1384,6 +1423,14 @@ class Runner:
                     f"items_skipped={stage_meta['items_skipped']} "
                     f"provider={stage.provider} model={stage.model}"
                 ),
+            )
+            self._progress(
+                (
+                    f"stage {stage.stage_id} {stage_meta['status']} "
+                    f"(completed={stage_meta['items_completed']} "
+                    f"failed={stage_meta['items_failed']} "
+                    f"skipped={stage_meta['items_skipped']})"
+                )
             )
             return False
 
@@ -1608,6 +1655,14 @@ class Runner:
                 f"provider={stage.provider} model={stage.model}"
             ),
         )
+        self._progress(
+            (
+                f"stage {stage.stage_id} {stage_meta['status']} "
+                f"(completed={stage_meta['items_completed']} "
+                f"failed={stage_meta['items_failed']} "
+                f"skipped={stage_meta['items_skipped']})"
+            )
+        )
         return False
 
     def _publish_outputs(self, pipeline: Pipeline, run_dir: Path, meta: dict[str, Any]) -> None:
@@ -1714,6 +1769,9 @@ class Runner:
             }
             _write_json(run_dir / "run.json", meta)
             _append_log(run_dir, f"run status=started pipeline={pipeline.name}")
+            self._progress(
+                f"run started pipeline={pipeline.name} run_dir={run_dir}"
+            )
         else:
             run_dir = Path(run_dir)
             run_meta_path = run_dir / "run.json"
@@ -1725,6 +1783,9 @@ class Runner:
                 raise RunnerError("Pipeline name does not match existing run.")
             meta.setdefault("stages", {})
             _append_log(run_dir, f"run status=resumed pipeline={pipeline.name}")
+            self._progress(
+                f"run resumed pipeline={pipeline.name} run_dir={run_dir}"
+            )
 
         for stage in pipeline.stages[:start_idx]:
             if not stage.enabled:
@@ -1780,6 +1841,9 @@ class Runner:
                         run_dir,
                         f"Stage {stage.stage_id} SKIPPED (disabled in pipeline yaml)",
                     )
+                    self._progress(
+                        f"stage {stage.stage_id} skipped (disabled in pipeline yaml)"
+                    )
                     if idx == stop_idx:
                         if stop_idx == len(pipeline.stages) - 1:
                             meta["completed_at"] = _utc_now()
@@ -1789,6 +1853,7 @@ class Runner:
                             meta["status"] = "stopped"
                         _write_json(run_dir / "run.json", meta)
                         _append_log(run_dir, f"run status={meta['status']}")
+                        self._progress(f"run {meta['status']}")
                         self._publish_outputs(pipeline, run_dir, meta)
                         return run_dir
                     continue
@@ -1839,6 +1904,12 @@ class Runner:
                             f"error=disabled_dependency dependency={disabled_dep}"
                         ),
                     )
+                    self._progress(
+                        (
+                            f"stage {stage.stage_id} failed "
+                            f"(disabled dependency {disabled_dep})"
+                        )
+                    )
                     raise RunnerError(message)
 
                 if stage.mode == "map":
@@ -1856,6 +1927,7 @@ class Runner:
                         meta["batch_pending_at"] = _utc_now()
                         _write_json(run_dir / "run.json", meta)
                         _append_log(run_dir, "run status=batch_pending")
+                        self._progress("run batch_pending")
                         return run_dir
                 else:
                     self._run_single_stage(
@@ -1876,6 +1948,7 @@ class Runner:
                         meta["status"] = "stopped"
                     _write_json(run_dir / "run.json", meta)
                     _append_log(run_dir, f"run status={meta['status']}")
+                    self._progress(f"run {meta['status']}")
                     self._publish_outputs(pipeline, run_dir, meta)
                     return run_dir
 
@@ -1889,6 +1962,7 @@ class Runner:
                 meta["status"] = "completed"
             _write_json(run_dir / "run.json", meta)
             _append_log(run_dir, f"run status={meta['status']}")
+            self._progress(f"run {meta['status']}")
             self._publish_outputs(pipeline, run_dir, meta)
         except Exception as exc:
             meta["status"] = "failed"
@@ -1896,6 +1970,7 @@ class Runner:
             meta["failed_at"] = _utc_now()
             _write_json(run_dir / "run.json", meta)
             _append_log(run_dir, f"run status=failed error={exc}")
+            self._progress(f"run failed error={exc}")
             raise
 
         return run_dir

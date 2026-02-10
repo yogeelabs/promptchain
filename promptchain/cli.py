@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.run_dir and params:
                 raise RunnerError("Do not pass parameters when resuming a run.")
             pipeline = load_pipeline(args.pipeline)
-            runner = Runner()
+            runner = Runner(progress=True)
             run_dir = runner.run(
                 pipeline,
                 params,

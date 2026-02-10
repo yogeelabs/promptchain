@@ -12,7 +12,7 @@ Local-first, inspectable prompt chaining for deliberate multi-step workflows.
 PromptChain can optionally use the OpenAI API. This is opt-in and does not change the local-first default.
 
 Requirements:
-- `OPENAI_API_KEY` set in the environment
+- `OPENAI_API_KEY` set in the environment (or `.env`; see `.env.example`)
 - Pipeline configured with `provider: openai`
 
 Example:
